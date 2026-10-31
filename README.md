@@ -85,3 +85,10 @@ Technisch: `parseEnsemble` leest `precipitation`, `precipitation_member01…` en
 ## Zoom en tijdas
 
 Knijpen tekent de grafieken in place opnieuw (de bezig-aanraking blijft op hetzelfde element via pointer capture), zodat je kunt blijven knijpen; pas bij loslaten wordt het hele scherm ververst en de keuze opgeslagen. De tijdas kiest de labelstap (1, 2, 3, 6 of 12 uur) zo dat labels minstens 44 px uit elkaar staan, met verticale stippellijnen op elk label; middernacht houdt zijn eigen daglijn.
+
+## Versie 5: metingen, kanslijn, nu-label, grijze bewolking
+
+- **Actuele meting in de hero-tegels.** Temperatuur en wind komen van het dichtstbijzijnde KNMI-station met temperatuurmeting, via de Buienradar-feed (`data.buienradar.nl/2.0/feed/json`, 10-minutenwaarden, CORS open). De tegel noemt meettijd, station en afstand, en daarnaast de HARMONIE-waarde van dit uur. Kuststations zonder temperatuur (IJmuiden, Texelhors, Houtribdijk, Wijdenes, Rotterdam Geulhaven) worden overgeslagen. De KNMI EDR-API is niet bruikbaar vanuit de browser (anonieme sleutel geweigerd).
+- **Kans op regen** staat nu in dezelfde kaart als de HARMONIE-staven, als lage sub-grafiek (92 px) met dezelfde tijdas en zoom: een vloeiende lijn via monotone kubieke interpolatie (Fritsch–Carlson, geen overshoot), elk uurpunt in het midden van zijn uur.
+- **Nu-label.** Onder de gestippelde nu-lijn staat de huidige tijd vet; reguliere tijdlabels binnen 30 px ervan vervallen (op de 2-uurs grafiek ≈ 12 minuten, op 48 uur ≈ 2 uur). Het "nu"-label bovenin is weg.
+- **Bewolking in grijs.** De bedekkingslijn kleurt langs zijn lengte van lichtgrijs (0%) naar donkergrijs (100%) (in donker thema omgekeerd), met grijs vlak en grijze ensembleband. Bovendien trekt bewolking in álle grafieken de dagtint 70 % naar grijs, zodat een bewolkte dag grijs is en een heldere dag warm; de nacht blijft onveranderd.

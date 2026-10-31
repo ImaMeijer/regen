@@ -158,7 +158,35 @@ function skyColor(alt, pal) {
 function skyPalette() {
   const cs = getComputedStyle(document.documentElement);
   const get = (n, fb) => hexToRgb(cs.getPropertyValue(n) || fb);
-  return { day: get('--sky-day', '#fffaeb'), dawn: get('--sky-dawn', '#fde8cf'), night: get('--sky-night', '#e4e7f1') };
+  return { day: get('--sky-day', '#fffaeb'), dawn: get('--sky-dawn', '#fde8cf'), night: get('--sky-night', '#e4e7f1'), cloud: get('--sky-cloud', '#d8dae0') };
+}
+/* Grey for cloud cover: light grey when clear, dark grey when overcast (inverted in dark mode via tokens). */
+function cloudGrey(pct) {
+  const cs = getComputedStyle(document.documentElement);
+  const lo = hexToRgb(cs.getPropertyValue('--cloud-lo') || '#c9cbd1'), hi = hexToRgb(cs.getPropertyValue('--cloud-hi') || '#4b4c52');
+  const c = mix(lo, hi, clamp(pct, 0, 100) / 100);
+  return `rgb(${c[0]},${c[1]},${c[2]})`;
+}
+/* Monotone cubic (Fritsch–Carlson) through screen points: smooth, never overshoots the data. */
+function monotonePath(pts) {
+  const n = pts.length;
+  if (n < 2) return n ? `M${pts[0].x},${pts[0].y}` : '';
+  const dx = [], mm = [];
+  for (let i = 0; i < n - 1; i++) { dx[i] = pts[i + 1].x - pts[i].x; mm[i] = (pts[i + 1].y - pts[i].y) / (dx[i] || 1e-9); }
+  const t = [mm[0]];
+  for (let i = 1; i < n - 1; i++) t[i] = mm[i - 1] * mm[i] <= 0 ? 0 : (mm[i - 1] + mm[i]) / 2;
+  t[n - 1] = mm[n - 2];
+  for (let i = 0; i < n - 1; i++) {
+    if (mm[i] === 0) { t[i] = 0; t[i + 1] = 0; continue; }
+    const a = t[i] / mm[i], b = t[i + 1] / mm[i], s = a * a + b * b;
+    if (s > 9) { const tau = 3 / Math.sqrt(s); t[i] = tau * a * mm[i]; t[i + 1] = tau * b * mm[i]; }
+  }
+  let d = `M${pts[0].x},${pts[0].y}`;
+  for (let i = 0; i < n - 1; i++) {
+    const hh = dx[i] / 3;
+    d += ` C${(pts[i].x + hh).toFixed(2)},${(pts[i].y + hh * t[i]).toFixed(2)} ${(pts[i + 1].x - hh).toFixed(2)},${(pts[i + 1].y - hh * t[i + 1]).toFixed(2)} ${pts[i + 1].x.toFixed(2)},${pts[i + 1].y.toFixed(2)}`;
+  }
+  return d;
 }
 
 function niceScale(min, max, { zero = false, minSpan = 1, targetTicks = 4, fixedStep = null } = {}) {
@@ -302,8 +330,9 @@ function drawChart(host, spec) {
   const W = Math.max(280, host.clientWidth || 380);
   const H = spec.height || 210;
   const hasDays = spec.ticks === 'days';
+  const compact = !!spec.compact; // sub-chart under a main chart: same x-axis, no day strip, no x labels
   const arrowRow = spec.arrows ? 22 : 0;
-  const m = { top: hasDays ? 42 : 26, right: 10, bottom: 24 + arrowRow, left: 34 };
+  const m = { top: compact ? 10 : (hasDays ? 42 : 26), right: 10, bottom: compact ? 8 : 24 + arrowRow, left: 34 };
   const pw = W - m.left - m.right, ph = H - m.top - m.bottom;
   const t0 = spec.tMin.getTime();
   // multi-day charts honour the zoom horizon: the start stays at "nu", only the end moves
@@ -340,8 +369,14 @@ function drawChart(host, spec) {
     const grad = svgEl('linearGradient', { id: gid, x1: 0, x2: 1, y1: 0, y2: 0 });
     const stepMs = (t1 - t0) <= 6 * HOUR ? 5 * 60e3 : 10 * 60e3;
     for (let t = t0; t <= t1; t += stepMs) {
-      const [r, g, b] = skyColor(sunAltitude(new Date(t), lat, lon), pal);
-      grad.appendChild(svgEl('stop', { offset: ((t - t0) / (t1 - t0)).toFixed(4), 'stop-color': `rgb(${r},${g},${b})` }));
+      const alt = sunAltitude(new Date(t), lat, lon);
+      let c = skyColor(alt, pal);
+      // clouds grey the daylight: full overcast pulls the day tint 70 % towards neutral grey; night is untouched
+      if (spec.sky.cloudAt) {
+        const f = spec.sky.cloudAt(new Date(t));
+        if (f != null) c = mix(c, pal.cloud, clamp((alt + 6) / 14, 0, 1) * 0.7 * f);
+      }
+      grad.appendChild(svgEl('stop', { offset: ((t - t0) / (t1 - t0)).toFixed(4), 'stop-color': `rgb(${c[0]},${c[1]},${c[2]})` }));
     }
     defs.appendChild(grad);
     svg.appendChild(defs);
@@ -380,7 +415,7 @@ function drawChart(host, spec) {
       }
     }
     days.push([segStart, t1]);
-    for (const [a, b] of days) {
+    if (!compact) for (const [a, b] of days) {
       const wseg = x(b) - x(a); if (wseg < 22) continue;
       svg.appendChild(svgEl('text', { x: (x(a) + x(b)) / 2, y: m.top - 26, 'text-anchor': 'middle', class: 'day-label' }, wseg < 64 ? fmtWd(new Date(a)) : fmtDay(new Date(a))));
     }
@@ -391,15 +426,23 @@ function drawChart(host, spec) {
     }
   }
   svg.appendChild(vgrid);
-  for (const l of labelAt) {
-    const px = x(l.t);
-    if (px < m.left - 1 || px > W - m.right + 1) continue;
-    svg.appendChild(svgEl('text', { x: px, y: m.top + ph + 15, 'text-anchor': 'middle', class: 'tick' }, l.txt));
+  // the current time gets its own label under the dashed line; regular labels too close to it are dropped
+  const nowMs = spec.now ? spec.now.getTime() : null;
+  const nowPx = nowMs != null && nowMs >= t0 && nowMs < t1 ? x(nowMs) : null;
+  const NOW_GAP = 30; // px, about 12 minutes on the 2-hour chart and 2 hours on a 2,5-day chart
+  if (!compact) {
+    for (const l of labelAt) {
+      const px = x(l.t);
+      if (px < m.left - 1 || px > W - m.right + 1) continue;
+      if (nowPx != null && Math.abs(px - nowPx) < NOW_GAP) continue;
+      svg.appendChild(svgEl('text', { x: px, y: m.top + ph + 15, 'text-anchor': 'middle', class: 'tick' }, l.txt));
+    }
+    if (nowPx != null) svg.appendChild(svgEl('text', { x: clamp(nowPx, m.left + 16, W - m.right - 16), y: m.top + ph + 15, 'text-anchor': 'middle', class: 'now-tick' }, fmtTime(spec.now)));
   }
 
   // sunrise / sunset glyphs in the strip above the plot, dressed with the weather of that hour
   for (const ev of sunEvents) {
-    if (ev.kind !== 'sunrise' && ev.kind !== 'sunset') continue;
+    if (compact || (ev.kind !== 'sunrise' && ev.kind !== 'sunset')) continue;
     const px = x(ev.t.getTime());
     if (px < m.left || px > W - m.right) continue;
     const wx = spec.sky.weatherAt ? spec.sky.weatherAt(ev.t) : null;
@@ -408,11 +451,7 @@ function drawChart(host, spec) {
   }
 
   // "now" marker
-  if (spec.now && spec.now.getTime() > t0 && spec.now.getTime() < t1) {
-    const px = x(spec.now.getTime());
-    svg.appendChild(svgEl('line', { class: 'now', x1: px, x2: px, y1: m.top - 2, y2: m.top + ph }));
-    svg.appendChild(svgEl('text', { x: px + 4, y: m.top + 8, class: 'now-label' }, 'nu'));
-  }
+  if (nowPx != null) svg.appendChild(svgEl('line', { class: 'now', x1: nowPx, x2: nowPx, y1: m.top - 2, y2: m.top + ph }));
 
   // baseline
   svg.appendChild(svgEl('line', { class: 'baseline', x1: m.left, x2: W - m.right, y1: y(sc.min), y2: y(sc.min) }));
@@ -446,14 +485,24 @@ function drawChart(host, spec) {
     } else { // line
       const pts = s.points.filter(p => p.v != null);
       if (!pts.length) continue;
-      if (s.area) {
-        const d = pts.map((p, i) => `${i ? 'L' : 'M'}${x(p.t.getTime())},${y(p.v)}`).join(' ') +
-          ` L${x(pts[pts.length - 1].t.getTime())},${y(sc.min)} L${x(pts[0].t.getTime())},${y(sc.min)} Z`;
-        const a = svgEl('path', { d }); a.style.fill = s.color; a.style.opacity = '0.10'; svg.appendChild(a);
+      const scr = pts.map(p => ({ x: x(p.t.getTime()), y: y(p.v) }));
+      const lineD = s.smooth ? monotonePath(scr) : scr.map((p, i) => `${i ? 'L' : 'M'}${p.x},${p.y}`).join(' ');
+      // optional value-driven colour along the line (e.g. grey that darkens with cloud cover)
+      let paint = s.color;
+      if (s.colorAt && pts.length > 1) {
+        const gid = 'ln' + Math.random().toString(36).slice(2, 8);
+        const grad = svgEl('linearGradient', { id: gid, gradientUnits: 'userSpaceOnUse', x1: scr[0].x, x2: scr[scr.length - 1].x, y1: 0, y2: 0 });
+        const span = scr[scr.length - 1].x - scr[0].x || 1;
+        pts.forEach((p, i) => grad.appendChild(svgEl('stop', { offset: ((scr[i].x - scr[0].x) / span).toFixed(4), 'stop-color': s.colorAt(p.v) })));
+        const defs = svgEl('defs'); defs.appendChild(grad); svg.appendChild(defs);
+        paint = `url(#${gid})`;
       }
-      const d = pts.map((p, i) => `${i ? 'L' : 'M'}${x(p.t.getTime())},${y(p.v)}`).join(' ');
-      const el = svgEl('path', { class: 'line' + (s.secondary ? ' secondary' : ''), d });
-      el.style.stroke = s.color;
+      if (s.area) {
+        const d = lineD + ` L${scr[scr.length - 1].x},${y(sc.min)} L${scr[0].x},${y(sc.min)} Z`;
+        const a = svgEl('path', { d }); a.style.fill = paint; a.style.opacity = s.areaOpacity != null ? String(s.areaOpacity) : '0.10'; svg.appendChild(a);
+      }
+      const el = svgEl('path', { class: 'line' + (s.secondary ? ' secondary' : ''), d: lineD });
+      el.style.stroke = paint;
       svg.appendChild(el);
     }
   }
@@ -706,15 +755,17 @@ async function load() {
   $('locName').textContent = state.loc.name;
   document.body.classList.add('loading');
   const now = new Date();
-  const [nc, fc, en] = await Promise.allSettled([
+  const [nc, fc, en, ob] = await Promise.allSettled([
     fetchOk(nowcastUrl(lat, lon), true).then(t => parseRaintext(t, now)),
     fetchOk(forecastUrl(lat, lon)).then(j => parseForecast(j, now)),
     fetchOk(ensembleUrl(lat, lon)).then(j => parseEnsemble(j, now)),
+    fetchOk(obsUrl).then(j => parseObs(j, lat, lon)),
   ]);
   state.errors = {};
   if (nc.status === 'fulfilled') state.nowcast = nc.value; else { state.nowcast = null; state.errors.nowcast = nc.reason.message; }
   if (fc.status === 'fulfilled') state.forecast = fc.value; else { state.forecast = null; state.errors.forecast = fc.reason.message; }
   if (en.status === 'fulfilled') state.ens = en.value; else { state.ens = null; state.errors.ens = en.reason.message; }
+  if (ob.status === 'fulfilled') state.obs = ob.value; else { state.obs = null; state.errors.obs = ob.reason.message; }
   state.updated = new Date();
   document.body.classList.remove('loading');
   render();
@@ -762,7 +813,35 @@ function weatherAt(t) {
   const iv = H.interval.find(p => ms >= p.t.getTime() && ms < p.tEnd.getTime());
   return { cloud: best.cloud_cover, rain: iv ? iv.precipitation : null };
 }
-const skyOf = () => ({ lat: state.loc.lat, lon: state.loc.lon, weatherAt });
+const cloudAt = t => { const w = weatherAt(t); return w && w.cloud != null ? w.cloud / 100 : null; };
+const skyOf = () => ({ lat: state.loc.lat, lon: state.loc.lon, weatherAt, cloudAt });
+
+/* ---- actuele metingen: KNMI-stations via de Buienradar-feed (10-minutenwaarden) ---- */
+const obsUrl = 'https://data.buienradar.nl/2.0/feed/json';
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const R = 6371, dLat = rad(lat2 - lat1), dLon = rad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+/* nearest station that reports a temperature; wind in km/u (feed gives m/s) */
+function parseObs(json, lat, lon) {
+  const list = json && json.actual && json.actual.stationmeasurements;
+  if (!Array.isArray(list)) throw new Error('Geen stationsmetingen in de feed');
+  let best = null;
+  for (const s of list) {
+    if (s.temperature == null || !Number.isFinite(s.lat) || !Number.isFinite(s.lon)) continue;
+    const d = haversineKm(lat, lon, s.lat, s.lon);
+    if (!best || d < best.dist) best = { dist: d, s };
+  }
+  if (!best) return null;
+  const s = best.s;
+  return {
+    station: String(s.stationname || '').replace(/^Meetstation\s+/i, ''), dist: best.dist, time: new Date(s.timestamp),
+    temp: s.temperature, feel: s.feeltemperature, humidity: s.humidity, pressure: s.airpressure,
+    wind: s.windspeed != null ? s.windspeed * 3.6 : null, gust: s.windgusts != null ? s.windgusts * 3.6 : null, dir: s.winddirectiondegrees,
+    desc: s.weatherdescription,
+  };
+}
 function renderSunline() {
   const el = $('sunline');
   const d0 = new Date(); d0.setHours(0, 0, 0, 0);
@@ -874,10 +953,10 @@ function renderRain(c) {
   const k1 = card('Komende 2 uur', ['Radar-nowcast · per 5 min · ', b('Buienradar')]);
   c.appendChild(k1.el);
   if (nc && nc.length) {
-    const tMin = nc[0].t, tMax = new Date(nc[nc.length - 1].t.getTime() + MIN5);
+    const tMin = new Date(Math.min(now.getTime(), nc[0].t.getTime())), tMax = new Date(nc[nc.length - 1].t.getTime() + MIN5); // start at 'nu' so the now-line sits at the left edge
     const pts = nc.map(p => ({ t: p.t, tEnd: new Date(p.t.getTime() + MIN5), v: p.v }));
     drawChart(k1.body, { sky: skyOf(),
-      tMin, tMax, unit: 'mm/u', unitTip: 'mm/u', ticks: 'nowcast', yOpts: { zero: true, minSpan: 1, headroom: 1.15 },
+      tMin, tMax, now, unit: 'mm/u', unitTip: 'mm/u', ticks: 'nowcast', yOpts: { zero: true, minSpan: 1, headroom: 1.15 },
       series: [{ kind: 'bar', name: 'Radar', color: 'var(--s1)', points: pts }],
       fmt: fmtMm, directLabels: 'peak', emptyText: 'Droog in de komende 2 uur', tipTime: p => `${fmtTime(p.t)}–${fmtTime(p.tEnd)}`,
       aria: 'Neerslagintensiteit per 5 minuten voor de komende 2 uur',
@@ -903,24 +982,25 @@ function renderRain(c) {
     aria: 'Neerslag per uur volgens HARMONIE',
   });
   k2.tableHost.appendChild(dataTable(modelPts(H), [{ label: 'Uur', get: p => `${fmtWd(p.t)} ${fmtTime(p.t)}` }, { label: 'mm', num: true, get: p => fmtNum(p.v, 1) }, { label: 'Kans', num: true, get: p => { const pr = probAt(p.t); return pr == null ? '–' : `${Math.round(pr * 100)}%`; } }]));
-  k2.el.appendChild(h('p', 'foot', `t/m ${fmtDayTime(H.horizon)} · staaf = som over dat uur`));
-
-  // probability card from the ensemble
+  // probability of rain from the ensemble: a smooth line in the same card, same x-axis, under the bars
   const e = state.ens;
-  const k3 = card('Kans op regen', [`${ENS.long} · ${ENS.res} · ${e ? e.members : ENS.members} leden`]);
-  c.appendChild(k3.el);
   if (e && e.prob.length) {
-    const pts = e.prob.map(p => ({ t: p.t, tEnd: p.tEnd, v: Math.round(p.v * 100), row: p }));
-    drawChart(k3.body, { sky: skyOf(),
-      tMin: fc.startHour, tMax: e.horizon, unit: '%', unitTip: '%', ticks: 'days', now, yFixed: { min: 0, max: 100, step: 25 }, height: 170,
-      series: [{ kind: 'bar', name: 'Kans op regen', color: 'var(--s1)', points: pts }], fmt: v => fmtNum(v, 0),
-      tipTime: p => `${fmtWd(p.t)} ${fmtHourRange(p.t)}`,
-      tipNote: (s, p) => { const hr = H.interval.find(q => q.t.getTime() === p.t.getTime()); return hr ? ` · HARMONIE ${fmtMm(hr.precipitation)} mm` : ''; },
+    const sub = h('div', 'chart sub');
+    k2.body.after(sub);
+    // each probability covers an hour; plot it at the middle of that hour so the curve sits over its bar
+    const pts = e.prob.map(p => ({ t: new Date(p.t.getTime() + HOUR / 2), tEnd: p.tEnd, v: Math.round(p.v * 100), row: p }));
+    drawChart(sub, { sky: skyOf(), compact: true,
+      ...spanFor([H]), unit: '%', unitTip: '%', ticks: 'days', now, yFixed: { min: 0, max: 100, step: 50 }, height: 92,
+      series: [{ kind: 'line', name: 'Kans op regen', color: 'var(--s1)', points: pts, smooth: true, area: true, areaOpacity: 0.14 }], fmt: v => fmtNum(v, 0),
+      tipTime: p => `${fmtWd(p.row.t)} ${fmtHourRange(p.row.t)}`,
+      tipNote: (s, p) => { const hr = H.interval.find(q => q.t.getTime() === p.row.t.getTime()); return hr ? ` · HARMONIE ${fmtMm(hr.precipitation)} mm` : ''; },
       aria: 'Kans op regen per uur volgens het ICON-D2-ensemble',
     });
-    k3.tableHost.appendChild(dataTable(pts, [{ label: 'Uur', get: p => `${fmtWd(p.t)} ${fmtTime(p.t)}` }, { label: 'Kans', num: true, get: p => `${p.v}%` }]));
-    k3.el.appendChild(h('p', 'foot', `Aandeel van de ${e.members} leden met ≥ 0,1 mm in dat uur · t/m ${fmtDayTime(e.horizon)}`));
-  } else errorNote(k3.body, 'ens', 'Ensemble');
+    legend(k2.el, [{ name: 'Neerslag per uur', color: 'var(--s1)', rect: true, note: 'HARMONIE' }, { name: 'Kans op regen', color: 'var(--s1)', note: `${ENS.long}, ${e.members} leden` }]);
+    k2.el.appendChild(h('p', 'foot', `HARMONIE t/m ${fmtDayTime(H.horizon)} · staaf = som over dat uur · kans = aandeel leden met ≥ 0,1 mm, t/m ${fmtDayTime(e.horizon)}`));
+  } else {
+    k2.el.appendChild(h('p', 'foot', `t/m ${fmtDayTime(H.horizon)} · staaf = som over dat uur${state.errors.ens ? ` · kans niet beschikbaar (${state.errors.ens})` : ''}`));
+  }
 
   // stats
   const sum = (arr, n) => arr.slice(0, n).reduce((s, p) => s + p.precipitation, 0);
@@ -932,12 +1012,12 @@ function renderRain(c) {
   c.appendChild(stats);
 }
 /* 10–90 %-band uit het ensemble als eerste reeks van een lijngrafiek */
-function ensBand(v) {
+function ensBand(v, color = 'var(--s1)') {
   const e = state.ens;
   if (!e || !e.bands[v] || !e.bands[v].length) return [];
-  return [{ kind: 'band', name: 'ensemble', color: 'var(--s1)', points: e.bands[v].map(r => ({ t: r.t, lo: r.lo, hi: r.hi })) }];
+  return [{ kind: 'band', name: 'ensemble', color, points: e.bands[v].map(r => ({ t: r.t, lo: r.lo, hi: r.hi })) }];
 }
-function ensLegend() { return state.ens ? [{ name: `10–90% van ${state.ens.members} leden ${ENS.long}`, color: 'var(--s1)', band: true }] : []; }
+function ensLegend(color = 'var(--s1)') { return state.ens ? [{ name: `10–90% van ${state.ens.members} leden ${ENS.long}`, color, band: true }] : []; }
 function ensFoot(H) { return state.ens ? ` · band t/m ${fmtDayTime(state.ens.horizon)}` : ''; }
 
 /* ---------------- shared for temp/wind/cloud ---------------- */
@@ -990,8 +1070,14 @@ function renderTemp(c) {
   const nowRow = H.instant[0];
   const today = H.instant.filter(p => p.t.getDate() === nowRow.t.getDate());
   const mx = Math.max(...today.map(p => p.temperature_2m)), mn = Math.min(...today.map(p => p.temperature_2m));
-  heroBlock(c, '<svg class="ico-big" viewBox="0 0 24 24"><path d="M10 4a2 2 0 0 1 4 0v9.3a4 4 0 1 1-4 0V4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="17" r="1.6" fill="currentColor"/><path d="M12 10v7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
-    `Nu · ${fmtTime(nowRow.t)}`, `${fmtNum(nowRow.temperature_2m, 0)}°`, `voelt als ${fmtNum(nowRow.apparent_temperature, 0)}° · vandaag ${fmtNum(mn, 0)}° tot ${fmtNum(mx, 0)}°`);
+  const o = state.obs;
+  const tempIcon = '<svg class="ico-big" viewBox="0 0 24 24"><path d="M10 4a2 2 0 0 1 4 0v9.3a4 4 0 1 1-4 0V4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="17" r="1.6" fill="currentColor"/><path d="M12 10v7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
+  if (o && o.temp != null) {
+    heroBlock(c, tempIcon, `Gemeten ${fmtTime(o.time)} · ${o.station} (${fmtNum(o.dist, 0)} km)`, `${fmtNum(o.temp, 0)}°`,
+      `voelt als ${fmtNum(o.feel != null ? o.feel : nowRow.apparent_temperature, 0)}° · HARMONIE nu ${fmtNum(nowRow.temperature_2m, 0)}° · vandaag ${fmtNum(mn, 0)}° tot ${fmtNum(mx, 0)}°`);
+  } else {
+    heroBlock(c, tempIcon, `Nu · ${fmtTime(nowRow.t)} · model`, `${fmtNum(nowRow.temperature_2m, 0)}°`, `voelt als ${fmtNum(nowRow.apparent_temperature, 0)}° · vandaag ${fmtNum(mn, 0)}° tot ${fmtNum(mx, 0)}°`);
+  }
 
   c.appendChild(horizonBar());
   const k1 = card(spanTitle(H.hours), [b('KNMI HARMONIE-AROME'), ' · 2 km · per uur']);
@@ -1015,9 +1101,14 @@ function renderTemp(c) {
 function renderWind(c) {
   const H = needHarmonie(c); if (!H) return;
   const r0 = H.instant[0];
-  const bft = beaufort(r0.wind_speed_10m);
-  heroBlock(c, '<svg class="ico-big" viewBox="0 0 24 24"><path d="M3 8h11a2.5 2.5 0 1 0-2.5-2.5M3 12h15a2.5 2.5 0 1 1-2.5 2.5M3 16h8a2 2 0 1 1-2 2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
-    `Nu · ${fmtTime(r0.t)}`, `${fmtNum(r0.wind_speed_10m, 0)} km/u`, `${bft} Bft uit ${compass(r0.wind_direction_10m)} (${fmtDeg(r0.wind_direction_10m)}) · stoten ${fmtNum(r0.wind_gusts_10m, 0)} km/u`);
+  const o = state.obs;
+  const windIcon = '<svg class="ico-big" viewBox="0 0 24 24"><path d="M3 8h11a2.5 2.5 0 1 0-2.5-2.5M3 12h15a2.5 2.5 0 1 1-2.5 2.5M3 16h8a2 2 0 1 1-2 2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
+  if (o && o.wind != null) {
+    heroBlock(c, windIcon, `Gemeten ${fmtTime(o.time)} · ${o.station} (${fmtNum(o.dist, 0)} km)`, `${fmtNum(o.wind, 0)} km/u`,
+      `${beaufort(o.wind)} Bft${o.dir != null ? ` uit ${compass(o.dir)} (${fmtDeg(o.dir)})` : ''}${o.gust != null ? ` · stoten ${fmtNum(o.gust, 0)} km/u` : ''} · HARMONIE nu ${fmtNum(r0.wind_speed_10m, 0)} km/u`);
+  } else {
+    heroBlock(c, windIcon, `Nu · ${fmtTime(r0.t)} · model`, `${fmtNum(r0.wind_speed_10m, 0)} km/u`, `${beaufort(r0.wind_speed_10m)} Bft uit ${compass(r0.wind_direction_10m)} (${fmtDeg(r0.wind_direction_10m)}) · stoten ${fmtNum(r0.wind_gusts_10m, 0)} km/u`);
+  }
 
   c.appendChild(horizonBar());
   const k1 = card(spanTitle(H.hours), [b('KNMI HARMONIE-AROME'), ' · 2 km · wind op 10 m']);
@@ -1054,16 +1145,16 @@ function renderCloud(c) {
   drawChart(k1.body, { sky: skyOf(),
     ...spanFor([H]), unit: '%', unitTip: '%', ticks: 'days', now: new Date(), yFixed: pct,
     series: [
-      ...ensBand('cloud_cover'),
-      { kind: 'line', name: 'Totaal', color: 'var(--s1)', points: instantPts(H, 'cloud_cover'), area: true },
-      { kind: 'line', name: 'Lage bewolking', color: 'var(--s1)', points: instantPts(H, 'cloud_cover_low'), secondary: true },
+      ...ensBand('cloud_cover', 'var(--cloud-hi)'),
+      { kind: 'line', name: 'Totaal', color: 'var(--cloud-hi)', colorAt: cloudGrey, points: instantPts(H, 'cloud_cover'), area: true, areaOpacity: 0.18 },
+      { kind: 'line', name: 'Lage bewolking', color: 'var(--cloud-mid)', points: instantPts(H, 'cloud_cover_low'), secondary: true },
     ],
     fmt: v => fmtNum(v, 0), tipTime: p => fmtDayTime(p.t),
     tipNote: (s, p) => (s.name === 'Totaal' ? ` · midden ${p.row.cloud_cover_mid}% · hoog ${p.row.cloud_cover_high}%` : ''),
     tipExtra: t => { const r = state.ens && state.ens.bands.cloud_cover.find(q => Math.abs(q.t.getTime() - t) < HOUR / 2); return r ? `ensemble ${fmtNum(r.lo, 0)} tot ${fmtNum(r.hi, 0)}%` : null; },
     aria: 'Bewolking per uur volgens HARMONIE',
   });
-  legend(k1.el, [{ name: 'Totale bedekking', color: 'var(--s1)' }, { name: 'Lage bewolking (< 2 km)', color: 'var(--s1)', dashed: true }, ...ensLegend()]);
+  legend(k1.el, [{ name: 'Totale bedekking', color: 'var(--cloud-hi)', note: 'donkerder = meer bewolking' }, { name: 'Lage bewolking (< 2 km)', color: 'var(--cloud-mid)', dashed: true }, ...ensLegend('var(--cloud-hi)')]);
   k1.tableHost.appendChild(dataTable(H.instant, [{ label: 'Uur', get: p => fmtDayTime(p.t) }, { label: 'Totaal', num: true, get: p => `${p.cloud_cover}%` }, { label: 'Laag', num: true, get: p => `${p.cloud_cover_low}%` }, { label: 'Midden', num: true, get: p => `${p.cloud_cover_mid}%` }, { label: 'Hoog', num: true, get: p => `${p.cloud_cover_high}%` }]));
   k1.el.appendChild(h('p', 'foot', `t/m ${fmtDayTime(H.horizon)}${ensFoot(H)}`));
 }
@@ -1176,7 +1267,7 @@ $('content').addEventListener('wheel', e => {
 /* ======================================================================
    6. Self-tests (open with ?test=1)
    ====================================================================== */
-const api = { raintextToMmh, parseRaintext, deriveCloudTotal, beaufort, compass, cloudWord, niceScale, parseForecast, parseEnsemble, quantile, tickStepHours, compareRain, drawChart, sunAltitude, solarEvents, skyColor, sunPhase, sunGlyph, sunWeatherKind, weatherAt, MODELS, state };
+const api = { raintextToMmh, parseRaintext, deriveCloudTotal, beaufort, compass, cloudWord, niceScale, parseForecast, parseEnsemble, parseObs, haversineKm, monotonePath, quantile, tickStepHours, compareRain, drawChart, sunAltitude, solarEvents, skyColor, sunPhase, sunGlyph, sunWeatherKind, weatherAt, MODELS, state };
 window.Regen = api;
 
 function runTests() {
@@ -1372,6 +1463,37 @@ function runTests() {
   });
   test('tijdlabels: stap volgt de zoom (≥ 44 px tussen labels)', () => {
     eq(tickStepHours(50), 1); eq(tickStepHours(25), 2); eq(tickStepHours(15), 3); eq(tickStepHours(8), 6); eq(tickStepHours(4), 12); eq(tickStepHours(1), 24);
+  });
+  test('vloeiende lijn: monotone interpolatie blijft tussen de datapunten (geen overshoot)', () => {
+    const pts = [{ x: 0, y: 100 }, { x: 10, y: 100 }, { x: 20, y: 0 }, { x: 30, y: 0 }, { x: 40, y: 50 }];
+    const d = monotonePath(pts);
+    ok(d.startsWith('M0,100') && d.includes(' C'), 'bezierpad');
+    const ys = [...d.matchAll(/[ ,](-?\d+(?:\.\d+)?)(?=[ ]|$)/g)].map(m => parseFloat(m[1]));
+    ok(ys.every(v => v >= -0.01 && v <= 100.01), 'alle controlepunten binnen 0..100');
+    eq(monotonePath([{ x: 1, y: 2 }]), 'M1,2'); eq(monotonePath([]), '');
+  });
+  test('meting: dichtstbijzijnde KNMI-station met temperatuur, wind in km/u', () => {
+    const json = { actual: { stationmeasurements: [
+      { stationname: 'Meetstation IJmuiden', lat: 52.47, lon: 4.57, windspeed: 10, timestamp: '2026-10-31T22:30:00' },
+      { stationname: 'Meetstation Schiphol', lat: 52.3, lon: 4.77, temperature: 9.1, feeltemperature: 7.5, windspeed: 5, windgusts: 8, winddirectiondegrees: 40, timestamp: '2026-10-31T22:30:00' },
+      { stationname: 'Meetstation De Bilt', lat: 52.1, lon: 5.18, temperature: 8.0, windspeed: 2, timestamp: '2026-10-31T22:30:00' },
+    ] } };
+    const o = parseObs(json, 52.37, 4.90); // Amsterdam: IJmuiden is dichterbij maar meet geen temperatuur
+    eq(o.station, 'Schiphol'); near(o.wind, 18, 1e-9); near(o.gust, 28.8, 1e-9); eq(o.temp, 9.1); eq(o.time.getHours(), 22); ok(o.dist > 10 && o.dist < 20, 'afstand ' + o.dist);
+    near(haversineKm(52.1, 5.18, 52.3, 4.77), 36, 1.5, 'De Bilt–Schiphol ≈ 36 km');
+    eq(parseObs({ actual: { stationmeasurements: [] } }, 52, 5), null);
+  });
+  test('nu-label: tijd onderaan onder de streep, botsend uurlabel verdwijnt', () => {
+    const host = h('div'); host.style.width = '360px'; document.body.appendChild(host);
+    const now = new Date(2026, 9, 31, 20, 4); // vlak na 20:00
+    const t0 = new Date(2026, 9, 31, 20, 0);
+    const pts = Array.from({ length: 24 }, (_, i) => ({ t: new Date(t0.getTime() + i * MIN5), tEnd: new Date(t0.getTime() + (i + 1) * MIN5), v: 0 }));
+    drawChart(host, { tMin: t0, tMax: new Date(t0.getTime() + 2 * HOUR), ticks: 'nowcast', unit: 'mm', now, series: [{ kind: 'bar', name: 'x', color: 'red', points: pts }], fmt: fmtMm, tipTime: () => '', yOpts: { zero: true } });
+    const ticks = [...host.querySelectorAll('text.tick')].map(e => e.textContent).filter(t => t.includes(':'));
+    const nowTick = host.querySelector('text.now-tick');
+    ok(nowTick && nowTick.textContent === '20:04', 'nu-label 20:04');
+    ok(!ticks.includes('20:00'), '20:00 weggelaten (te dicht bij nu)'); ok(ticks.includes('20:30'), '20:30 blijft');
+    host.remove();
   });
   test('horizon: zoom houdt de start op nu en kapt het einde af; buiten bereik = alles', () => {
     const saved = { f: state.forecast, hz: state.horizon };
