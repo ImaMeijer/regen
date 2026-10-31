@@ -71,3 +71,17 @@ Open-Meteo is gratis voor niet-commercieel gebruik tot 10.000 aanroepen per dag;
 ## Zonnetjes met weer
 
 De zonnetjes bij zonsopkomst en -ondergang tonen het HARMONIE-weer van dat moment: bewolking van het dichtstbijzijnde uur en neerslag van het lopende uur. Vier varianten: helder (alleen zon), half bewolkt (30–70% bedekking, kleine wolk), bewolkt (≥ 70%, wolk voor de zon) en regen (≥ 0,1 mm in dat uur, wolk met vallende druppels). De zon komt eenmalig op van achter een horizonlijntje of zakt er deels achter; bij "verminder beweging" staat alles stil. De titel van het glyph (lang indrukken) noemt tijd en weerwoord.
+
+## Ensemble (kans en spreiding)
+
+Sinds versie 4 toont de app geen vergelijking met ICON-D2 en AROME meer. In plaats daarvan komt de onzekerheid uit het ICON-D2-ensemble (DWD, 20 leden, 2,2 km, ±48 uur) via de Open-Meteo ensemble-API:
+
+- **Regen:** een aparte grafiek "Kans op regen" onder de HARMONIE-staven: per uur het aandeel leden met ≥ 0,1 mm in dat uur. De tooltip van de HARMONIE-staaf noemt diezelfde kans; de hero-tegel ook.
+- **Temperatuur, wind, bewolking:** een 10–90%-band van de leden achter de HARMONIE-lijn, met de bandbreedte in de tooltip.
+- HARMONIE blijft de verwachting; het ensemble zegt alleen hoe zeker die is. Beide bronnen staan in de legenda en voettekst. Zodra er een backend is, kan hier het KNMI HARMONIE-ensemble onder (zelfde interface).
+
+Technisch: `parseEnsemble` leest `precipitation`, `precipitation_member01…` enzovoort, kapt af waar minder dan 5 leden data hebben, en koppelt de neerslag aan het begin van het uur, net als HARMONIE. Bij één model in de aanvraag laat Open-Meteo de modelnaam uit de veldnamen weg; `parseForecast` valt daarop terug.
+
+## Zoom en tijdas
+
+Knijpen tekent de grafieken in place opnieuw (de bezig-aanraking blijft op hetzelfde element via pointer capture), zodat je kunt blijven knijpen; pas bij loslaten wordt het hele scherm ververst en de keuze opgeslagen. De tijdas kiest de labelstap (1, 2, 3, 6 of 12 uur) zo dat labels minstens 44 px uit elkaar staan, met verticale stippellijnen op elk label; middernacht houdt zijn eigen daglijn.
