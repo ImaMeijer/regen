@@ -182,8 +182,23 @@ h1 { font-size: 34px; font-weight: 700; letter-spacing: -0.02em; margin: 2px 0 0
 .chart .hit { fill: transparent; }
 .chart .arrow { fill: none; stroke: var(--label-2); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .chart .now { stroke: var(--label-2); stroke-width: 1.2; stroke-dasharray: 2 3; }
-.chart .sun circle { fill: var(--sun); }
-.chart .sun line { stroke: var(--sun); stroke-width: 1.2; stroke-linecap: round; }
+.chart .sun .disc { fill: var(--sun); }
+.chart .sun .rays line { stroke: var(--sun); stroke-width: 1.2; stroke-linecap: round; }
+.chart .sun .cloud path { fill: var(--card); stroke: var(--label-3); stroke-width: 1; stroke-linejoin: round; }
+.chart .sun .drops line { stroke: var(--s1); stroke-width: 1.3; stroke-linecap: round; }
+.chart .sun .horizon { stroke: var(--label-3); stroke-width: 1; opacity: 0.55; }
+.chart .sun.sunrise .sun-core { animation: sun-rise 1.8s cubic-bezier(.2,.7,.2,1) both; }
+.chart .sun.sunset .sun-core { animation: sun-set 1.8s cubic-bezier(.4,0,.6,1) both; }
+.chart .sun .rays { transform-origin: 0 0; animation: rays-spin 40s linear infinite; }
+.chart .sun.cloud .rays, .chart .sun.rain .rays { opacity: 0.6; }
+.chart .sun .drops line { animation: drop-fall 1.6s ease-in infinite; }
+.chart .sun .drops line:nth-child(2) { animation-delay: 0.5s; }
+.chart .sun .drops line:nth-child(3) { animation-delay: 1s; }
+@keyframes sun-rise { from { transform: translateY(8px); } to { transform: translateY(0); } }
+@keyframes sun-set { from { transform: translateY(0); } to { transform: translateY(2.5px); } }
+@keyframes rays-spin { to { transform: rotate(360deg); } }
+@keyframes drop-fall { 0% { transform: translateY(-1.5px); opacity: 0; } 25% { opacity: 1; } 100% { transform: translateY(2.5px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .chart .sun * { animation: none !important; } .chart .sun.sunset .sun-core { transform: translateY(2.5px); } }
 .chart .now-label { fill: var(--label-2); font-weight: 600; font-size: 10.5px; }
 .empty { color: var(--label-3); font-size: 15px; padding: 28px 0; text-align: center; }
 

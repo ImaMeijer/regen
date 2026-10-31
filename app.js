@@ -241,6 +241,50 @@ function compareRain(primary, other, hours = COMPARE_HOURS) {
 /* ======================================================================
    2. Chart engine (SVG)
    ====================================================================== */
+/* ---- sun glyphs: the weather of the hour decides the picture ---- */
+const SUN_WORDS = { clear: 'helder', partly: 'half bewolkt', cloud: 'bewolkt', rain: 'regen' };
+function sunWeatherKind(w) {
+  if (!w) return 'clear';
+  if (w.rain != null && w.rain >= 0.1) return 'rain';
+  if (w.cloud != null && w.cloud >= 70) return 'cloud';
+  if (w.cloud != null && w.cloud >= 30) return 'partly';
+  return 'clear';
+}
+let glyphSeq = 0;
+function sunGlyph(px, py, event, kind, title) {
+  const g = svgEl('g', { class: `sun ${event} ${kind}`, transform: `translate(${px},${py})` });
+  const id = 'h' + (glyphSeq++);
+  // everything below the horizon line is hidden, so the sun can rise from / sink behind it
+  const defs = svgEl('defs');
+  const clip = svgEl('clipPath', { id });
+  clip.appendChild(svgEl('rect', { x: -14, y: -16, width: 28, height: 21.5 }));
+  defs.appendChild(clip);
+  g.appendChild(defs);
+  const clipped = svgEl('g', { 'clip-path': `url(#${id})` });
+  const sun = svgEl('g', { class: 'sun-core' });
+  sun.appendChild(svgEl('circle', { class: 'disc', r: 3.6 }));
+  const rays = svgEl('g', { class: 'rays' });
+  for (let k = 0; k < 8; k++) { const a = rad(k * 45); rays.appendChild(svgEl('line', { x1: Math.cos(a) * 5.2, y1: Math.sin(a) * 5.2, x2: Math.cos(a) * 7, y2: Math.sin(a) * 7 })); }
+  sun.appendChild(rays);
+  clipped.appendChild(sun);
+  g.appendChild(clipped);
+  if (kind !== 'clear') {
+    // cloud sits in front of the sun, lower right; bigger when overcast or raining
+    const s = kind === 'partly' ? 0.8 : 1;
+    const cloud = svgEl('g', { class: 'cloud', transform: `translate(${kind === 'partly' ? 3.5 : 3.2},${kind === 'partly' ? 3 : 3}) scale(${s})` });
+    cloud.appendChild(svgEl('path', { d: 'M-5 3.5a3 3 0 0 1-.4-5.97A4 4 0 0 1 2.3 -1.8h.3a2.7 2.7 0 0 1 0 5.3H-5z' }));
+    g.appendChild(cloud);
+    if (kind === 'rain') {
+      const drops = svgEl('g', { class: 'drops' });
+      for (const dx of [-3.2, -0.4, 2.4]) drops.appendChild(svgEl('line', { x1: dx + 0.6, y1: 5.2, x2: dx - 0.2, y2: 7.4 }));
+      g.appendChild(drops);
+    }
+  }
+  g.appendChild(svgEl('line', { class: 'horizon', x1: -8, x2: 8, y1: 5.5, y2: 5.5 }));
+  g.appendChild(svgEl('title', {}, title));
+  return g;
+}
+
 const tooltipEl = () => $('tooltip');
 function hideTooltip() { const t = tooltipEl(); if (t) t.hidden = true; }
 
@@ -251,7 +295,7 @@ function drawChart(host, spec) {
   const H = spec.height || 210;
   const hasDays = spec.ticks === 'days';
   const arrowRow = spec.arrows ? 22 : 0;
-  const m = { top: hasDays ? 36 : 22, right: 10, bottom: 24 + arrowRow, left: 34 };
+  const m = { top: hasDays ? 42 : 26, right: 10, bottom: 24 + arrowRow, left: 34 };
   const pw = W - m.left - m.right, ph = H - m.top - m.bottom;
   const t0 = spec.tMin.getTime(), t1 = spec.tMax.getTime();
   // clip every series to the visible window so nothing is drawn past the axis when zoomed in
@@ -315,7 +359,7 @@ function drawChart(host, spec) {
     for (let t = d.getTime(); t <= t1; t += HOUR) {
       const dt = new Date(t);
       if (dt.getHours() === 0 && t > t0) {
-        svg.appendChild(svgEl('line', { class: 'day-sep', x1: x(t), x2: x(t), y1: m.top - 16, y2: m.top + ph }));
+        svg.appendChild(svgEl('line', { class: 'day-sep', x1: x(t), x2: x(t), y1: m.top - 22, y2: m.top + ph }));
         days.push([segStart, t]); segStart = t;
       }
       if (dt.getHours() % every === 0 && t >= t0) labelAt.push({ t, txt: fmtTime(dt) });
@@ -324,7 +368,7 @@ function drawChart(host, spec) {
     days.push([segStart, t1]);
     for (const [a, b] of days) {
       const wseg = x(b) - x(a); if (wseg < 22) continue;
-      svg.appendChild(svgEl('text', { x: (x(a) + x(b)) / 2, y: m.top - 20, 'text-anchor': 'middle', class: 'day-label' }, wseg < 64 ? fmtWd(new Date(a)) : fmtDay(new Date(a))));
+      svg.appendChild(svgEl('text', { x: (x(a) + x(b)) / 2, y: m.top - 26, 'text-anchor': 'middle', class: 'day-label' }, wseg < 64 ? fmtWd(new Date(a)) : fmtDay(new Date(a))));
     }
   } else {
     for (let t = Math.ceil(t0 / (30 * 60e3)) * 30 * 60e3; t <= t1; t += 30 * 60e3) labelAt.push({ t, txt: fmtTime(new Date(t)) });
@@ -335,17 +379,14 @@ function drawChart(host, spec) {
     svg.appendChild(svgEl('text', { x: px, y: m.top + ph + 15, 'text-anchor': 'middle', class: 'tick' }, l.txt));
   }
 
-  // sunrise / sunset glyphs in the strip above the plot
+  // sunrise / sunset glyphs in the strip above the plot, dressed with the weather of that hour
   for (const ev of sunEvents) {
     if (ev.kind !== 'sunrise' && ev.kind !== 'sunset') continue;
     const px = x(ev.t.getTime());
     if (px < m.left || px > W - m.right) continue;
-    const g = svgEl('g', { class: 'sun ' + ev.kind, transform: `translate(${px},${m.top - 7})` });
-    g.appendChild(svgEl('circle', { r: 2.6 }));
-    for (let k = 0; k < 8; k++) { const a = rad(k * 45); g.appendChild(svgEl('line', { x1: Math.cos(a) * 4, y1: Math.sin(a) * 4, x2: Math.cos(a) * 5.5, y2: Math.sin(a) * 5.5 })); }
-    const title = svgEl('title', {}, `${ev.kind === 'sunrise' ? 'Zon op' : 'Zon onder'} ${fmtTime(ev.t)}`);
-    g.appendChild(title);
-    svg.appendChild(g);
+    const wx = spec.sky.weatherAt ? spec.sky.weatherAt(ev.t) : null;
+    const kind = sunWeatherKind(wx);
+    svg.appendChild(sunGlyph(px, m.top - 9, ev.kind, kind, `${ev.kind === 'sunrise' ? 'Zon op' : 'Zon onder'} ${fmtTime(ev.t)} · ${SUN_WORDS[kind]}`));
   }
 
   // "now" marker
@@ -640,7 +681,18 @@ function render() {
   }
 }
 
-const skyOf = () => ({ lat: state.loc.lat, lon: state.loc.lon });
+/* Weather at an instant, from HARMONIE: cloud cover of the nearest hour and precipitation of the hour containing t. */
+function weatherAt(t) {
+  const H = state.forecast && state.forecast.models.harmonie;
+  if (!H || !H.applicable) return null;
+  const ms = t.getTime();
+  let best = null;
+  for (const r of H.instant) if (!best || Math.abs(r.t.getTime() - ms) < Math.abs(best.t.getTime() - ms)) best = r;
+  if (!best || Math.abs(best.t.getTime() - ms) > HOUR) return null;
+  const iv = H.interval.find(p => ms >= p.t.getTime() && ms < p.tEnd.getTime());
+  return { cloud: best.cloud_cover, rain: iv ? iv.precipitation : null };
+}
+const skyOf = () => ({ lat: state.loc.lat, lon: state.loc.lon, weatherAt });
 function renderSunline() {
   const el = $('sunline');
   const d0 = new Date(); d0.setHours(0, 0, 0, 0);
@@ -1066,7 +1118,7 @@ $('content').addEventListener('wheel', e => {
 /* ======================================================================
    6. Self-tests (open with ?test=1)
    ====================================================================== */
-const api = { raintextToMmh, parseRaintext, deriveCloudTotal, beaufort, compass, cloudWord, niceScale, parseForecast, compareRain, drawChart, sunAltitude, solarEvents, skyColor, sunPhase, MODELS, state };
+const api = { raintextToMmh, parseRaintext, deriveCloudTotal, beaufort, compass, cloudWord, niceScale, parseForecast, compareRain, drawChart, sunAltitude, solarEvents, skyColor, sunPhase, sunGlyph, sunWeatherKind, weatherAt, MODELS, state };
 window.Regen = api;
 
 function runTests() {
@@ -1229,6 +1281,21 @@ function runTests() {
     eq(sunPhase(1), 'dag'); eq(sunPhase(-3), 'burgerlijke schemer'); eq(sunPhase(-10), 'nautische schemer'); eq(sunPhase(-25), 'nacht');
   });
 
+  test('zonglyph: weer bepaalt de variant (regen > bewolkt > half bewolkt > helder)', () => {
+    eq(sunWeatherKind(null), 'clear'); eq(sunWeatherKind({ cloud: 10, rain: 0 }), 'clear'); eq(sunWeatherKind({ cloud: 45, rain: 0 }), 'partly');
+    eq(sunWeatherKind({ cloud: 90, rain: 0.05 }), 'cloud'); eq(sunWeatherKind({ cloud: 20, rain: 0.3 }), 'rain'); eq(sunWeatherKind({ cloud: null, rain: null }), 'clear');
+    const g = sunGlyph(0, 0, 'sunrise', 'rain', 't'); eq(g.querySelectorAll('.drops line').length, 3); ok(g.querySelector('.cloud'), 'wolk aanwezig');
+    ok(!sunGlyph(0, 0, 'sunset', 'clear', 't').querySelector('.cloud'), 'helder zonder wolk');
+  });
+  test('weatherAt: bewolking van het dichtstbijzijnde uur, neerslag van het lopende uur', () => {
+    const saved = state.forecast;
+    try {
+      state.forecast = parseForecast(mkJson(undefined, hh => { hh['precipitation_knmi_harmonie_arome_netherlands'][23] = 1.2; hh['cloud_cover_knmi_harmonie_arome_netherlands'][22] = 95; }), NOW);
+      const w = weatherAt(new Date(2026, 9, 31, 22, 20)); // in het uur 22–23, dichtst bij 22:00
+      eq(w.rain, 1.2, 'neerslag van uur 22–23 (waarde bij 23:00)'); eq(w.cloud, 95, 'bewolking om 22:00');
+      eq(weatherAt(new Date(2030, 0, 1)), null, 'buiten bereik');
+    } finally { state.forecast = saved; }
+  });
   test('horizon: zoom houdt de start op nu en kapt het einde af; buiten bereik = alles', () => {
     const saved = { f: state.forecast, hz: state.horizon };
     try {

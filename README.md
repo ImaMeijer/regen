@@ -67,3 +67,7 @@ De 2,5-daagse grafieken delen één horizon-instelling: "nu t/m x uur vooruit". 
 De app is statisch: zet de map `regenapp/` op een HTTPS-host (GitHub Pages, Cloudflare Pages, Netlify) en open de link in Safari of Chrome. Kies "Zet op beginscherm". `manifest.json` zorgt voor naam, icoon (`icon.svg`) en schermvullende weergave; `sw.js` cachet de app-schil en het laatste API-antwoord, zodat de app zonder netwerk opent met de laatst opgehaalde data. De service worker registreert alleen op HTTPS. iOS gebruikt geen SVG als beginschermicoon en valt terug op een schermafbeelding; voor een strak icoon op iPhone is een 180×180 PNG als `apple-touch-icon` nodig. Bij een nieuwe versie: verhoog `CACHE` in `sw.js`.
 
 Open-Meteo is gratis voor niet-commercieel gebruik tot 10.000 aanroepen per dag; een paar gebruikers die elke 5 minuten verversen blijven daar ruim onder.
+
+## Zonnetjes met weer
+
+De zonnetjes bij zonsopkomst en -ondergang tonen het HARMONIE-weer van dat moment: bewolking van het dichtstbijzijnde uur en neerslag van het lopende uur. Vier varianten: helder (alleen zon), half bewolkt (30–70% bedekking, kleine wolk), bewolkt (≥ 70%, wolk voor de zon) en regen (≥ 0,1 mm in dat uur, wolk met vallende druppels). De zon komt eenmalig op van achter een horizonlijntje of zakt er deels achter; bij "verminder beweging" staat alles stil. De titel van het glyph (lang indrukken) noemt tijd en weerwoord.
