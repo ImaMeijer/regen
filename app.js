@@ -1021,6 +1021,12 @@ let toastTimer = null;
 function toast(msg) { const t = $('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 2500); }
 let resizeTimer = null;
 window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(render, 150); });
+/* Op de telefoon staan timers stil zolang de app in de achtergrond zit. Bij terugkomen direct verversen
+   als de data ouder is dan 2 minuten, zodat je nooit naar een oude nowcast kijkt. */
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  if (!state.updated || Date.now() - state.updated.getTime() > 2 * 60e3) load();
+});
 document.addEventListener('scroll', hideTooltip, true);
 
 /* ---- pinch-to-zoom on the multi-day charts: two touch pointers; the span start stays at "nu" ---- */
