@@ -1,0 +1,15 @@
+{
+  "name": "Regen",
+  "short_name": "Regen",
+  "description": "Neerslag, temperatuur, wind en bewolking uit KNMI HARMONIE-AROME, met radar-nowcast.",
+  "lang": "nl",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f2f2f7",
+  "theme_color": "#2a78d6",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}
