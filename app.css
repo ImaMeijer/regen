@@ -250,7 +250,7 @@ h1 { font-size: 34px; font-weight: 700; letter-spacing: -0.02em; margin: 2px 0 0
 .ok-row .ico { width: 16px; height: 16px; color: #1baf7a; }
 
 /* ---------- stat strip ---------- */
-.stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-top: 14px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-top: 14px; }
 .stat { background: var(--card); border-radius: 14px; padding: 10px 12px; }
 .stat .l { font-size: 12px; color: var(--label-2); }
 .stat .v { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; margin-top: 1px; line-height: 1.2; }
@@ -343,3 +343,46 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .segmented.compact button[aria-pressed="true"] { background: var(--bg); box-shadow: none; }
 .hz-hint { margin: 6px 2px 0; font-size: 12px; color: var(--label-3); }
 .chart.zoomable { touch-action: pan-y; }
+
+/* ---------- weather icons in the overview row ---------- */
+.chart .wicon .disc { fill: var(--sun); }
+.chart .wicon .sun-core line { stroke: var(--sun); stroke-width: 1.1; stroke-linecap: round; }
+.chart .wicon .moon { fill: var(--label-2); }
+.chart .wicon .cloud path { fill: var(--card); stroke: var(--label-3); stroke-width: 1; stroke-linejoin: round; }
+.chart .wicon.cloud .cloud path, .chart .wicon.rain .cloud path { fill: var(--cloud-lo); }
+.chart .wicon .drops line { stroke: var(--s1); stroke-width: 1.2; stroke-linecap: round; }
+
+/* ---------- the tree ---------- */
+.tree { display: flex; align-items: center; gap: 10px; margin: 6px 0 2px; }
+.tree svg { width: 128px; height: 96px; flex: none; overflow: visible; }
+.tree .ground { stroke: var(--separator); stroke-width: 1.5; stroke-linecap: round; }
+.tree .bark { fill: #8a6a4b; }
+.tree .blob { fill: #4f9a4a; opacity: 0.9; }
+.tree .leaf { fill: #7fc46a; }
+.tree .flyer { fill: #c9a24f; opacity: 0; }
+.tree .trunk { transform-origin: 80px 108px; animation: tree-sway var(--period, 3s) ease-in-out infinite alternate; }
+.tree .canopy { transform-origin: 80px 72px; animation: tree-sway var(--period, 3s) ease-in-out infinite alternate; animation-delay: calc(var(--period, 3s) * -0.3); }
+.tree .leaf { transform-box: fill-box; transform-origin: center; animation: leaf-flutter calc(var(--period, 3s) * 0.5) ease-in-out infinite alternate; }
+.tree .leaf:nth-child(3n) { animation-delay: -0.4s; } .tree .leaf:nth-child(3n+1) { animation-delay: -0.9s; }
+.tree.still .trunk, .tree.still .canopy, .tree.still .leaf { animation: none; }
+.tree.flying .flyer { animation: leaf-fly calc(var(--period, 3s) * 1.6) linear infinite; }
+.tree-text { font-size: 13px; color: var(--label-2); line-height: 1.35; }
+.tree-caption { font-weight: 600; color: var(--label); }
+@keyframes tree-sway { from { transform: rotate(calc(var(--lean, 0deg) - var(--amp, 0deg))); } to { transform: rotate(calc(var(--lean, 0deg) + var(--amp, 0deg))); } }
+@keyframes leaf-flutter { from { transform: rotate(calc(-2 * var(--amp, 0deg))); } to { transform: rotate(calc(2 * var(--amp, 0deg))); } }
+@keyframes leaf-fly { 0% { opacity: 0; transform: translate(0, 0) rotate(0deg); } 12% { opacity: 0.9; } 100% { opacity: 0; transform: translate(calc(var(--dx, 1) * 95px), -18px) rotate(260deg); } }
+@media (prefers-reduced-motion: reduce) { .tree * { animation: none !important; } .tree .trunk { transform: rotate(var(--lean, 0deg)); } }
+
+/* ---------- info page ---------- */
+.info-btn {
+  display: inline-flex; align-items: center; gap: 6px; margin: 22px auto 10px; padding: 8px 14px;
+  border-radius: 999px; background: var(--card); color: var(--label-2); font-size: 13px; font-weight: 500;
+  position: relative; left: 50%; transform: translateX(-50%);
+}
+.info-btn .ico { width: 16px; height: 16px; }
+.card.info h2 { margin-bottom: 8px; }
+.card.info p { font-size: 15px; line-height: 1.5; color: var(--label); margin: 8px 0 0; }
+.card.info p b { font-weight: 600; }
+.card.info a { color: var(--tint); }
+.card.info table.bft { margin-top: 4px; }
+.card.info table.bft td { font-size: 13px; vertical-align: top; }

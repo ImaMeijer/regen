@@ -314,6 +314,54 @@ function sunGlyph(px, py, event, kind, title) {
   return g;
 }
 
+/* small weather icon for the overview row: sun or moon, with cloud / rain as the hour demands */
+const CLOUD_PATH = 'M-5 3.5a3 3 0 0 1-.4-5.97A4 4 0 0 1 2.3 -1.8h.3a2.7 2.7 0 0 1 0 5.3H-5z';
+function weatherIcon(px, py, kind, night) {
+  const g = svgEl('g', { class: `wicon ${kind}${night ? ' night' : ''}`, transform: `translate(${px},${py})` });
+  const body = kind === 'clear' || kind === 'partly';
+  if (body) {
+    const off = kind === 'partly' ? -2.5 : 0;
+    if (night) {
+      g.appendChild(svgEl('path', { class: 'moon', d: 'M1.2 -4.2a4.2 4.2 0 1 0 3.3 6.6a3.4 3.4 0 0 1-3.3-6.6z', transform: `translate(${off},${off})` }));
+    } else {
+      const sun = svgEl('g', { class: 'sun-core', transform: `translate(${off},${off})` });
+      sun.appendChild(svgEl('circle', { class: 'disc', r: 3 }));
+      for (let k = 0; k < 8; k++) { const a = rad(k * 45); sun.appendChild(svgEl('line', { x1: Math.cos(a) * 4.3, y1: Math.sin(a) * 4.3, x2: Math.cos(a) * 5.6, y2: Math.sin(a) * 5.6 })); }
+      g.appendChild(sun);
+    }
+  }
+  if (kind !== 'clear') {
+    const s = kind === 'partly' ? 0.85 : 1.05;
+    const cloud = svgEl('g', { class: 'cloud', transform: `translate(${kind === 'partly' ? 2.5 : 1},${kind === 'partly' ? 2.5 : 0.5}) scale(${s})` });
+    cloud.appendChild(svgEl('path', { d: CLOUD_PATH }));
+    g.appendChild(cloud);
+    if (kind === 'rain') {
+      const drops = svgEl('g', { class: 'drops' });
+      for (const dx of [-2.8, 0, 2.8]) drops.appendChild(svgEl('line', { x1: dx + 0.6, y1: 4.6, x2: dx - 0.2, y2: 7 }));
+      g.appendChild(drops);
+    }
+  }
+  const words = { clear: night ? 'helder' : 'zonnig', partly: 'half bewolkt', cloud: 'bewolkt', rain: 'regen' };
+  g.appendChild(svgEl('title', {}, words[kind]));
+  return g;
+}
+const ICON_WORDS = { clear: 'zonnig', partly: 'half bewolkt', cloud: 'bewolkt', rain: 'regen' };
+/* temperature → colour, cold blue through amber to warm red; interpolated between fixed stops */
+const TEMP_STOPS = [[-10, [79, 127, 216]], [5, [42, 120, 214]], [12, [58, 160, 168]], [18, [237, 161, 0]], [26, [235, 104, 52]], [34, [227, 73, 72]]];
+function tempColor(v) {
+  if (v == null) return 'var(--s1)';
+  if (v <= TEMP_STOPS[0][0]) return `rgb(${TEMP_STOPS[0][1].join(',')})`;
+  for (let i = 1; i < TEMP_STOPS.length; i++) {
+    if (v <= TEMP_STOPS[i][0]) {
+      const [a, ca] = TEMP_STOPS[i - 1], [b, cb] = TEMP_STOPS[i];
+      const c = mix(ca, cb, (v - a) / (b - a));
+      return `rgb(${c[0]},${c[1]},${c[2]})`;
+    }
+  }
+  const last = TEMP_STOPS[TEMP_STOPS.length - 1][1];
+  return `rgb(${last.join(',')})`;
+}
+
 const tooltipEl = () => $('tooltip');
 function hideTooltip() { const t = tooltipEl(); if (t) t.hidden = true; }
 
@@ -332,7 +380,9 @@ function drawChart(host, spec) {
   const hasDays = spec.ticks === 'days';
   const compact = !!spec.compact; // sub-chart under a main chart: same x-axis, no day strip, no x labels
   const arrowRow = spec.arrows ? 22 : 0;
-  const m = { top: compact ? 10 : (hasDays ? 42 : 26), right: 10, bottom: compact ? 8 : 24 + arrowRow, left: 34 };
+  const iconRow = spec.icons && !compact ? 24 : 0; // row of weather icons between the day strip and the plot
+  const m = { top: (compact ? 10 : (hasDays ? 42 : 26)) + iconRow, right: 10, bottom: compact ? 8 : 24 + arrowRow, left: 34 };
+  const strip = m.top - iconRow; // where the day strip sits (above the icon row)
   const pw = W - m.left - m.right, ph = H - m.top - m.bottom;
   const t0 = spec.tMin.getTime();
   // multi-day charts honour the zoom horizon: the start stays at "nu", only the end moves
@@ -406,7 +456,7 @@ function drawChart(host, spec) {
       const dt = new Date(t);
       const midnight = dt.getHours() === 0 && t > t0;
       if (midnight) {
-        svg.appendChild(svgEl('line', { class: 'day-sep', x1: x(t), x2: x(t), y1: m.top - 22, y2: m.top + ph }));
+        svg.appendChild(svgEl('line', { class: 'day-sep', x1: x(t), x2: x(t), y1: strip - 22, y2: m.top + ph }));
         days.push([segStart, t]); segStart = t;
       }
       if (dt.getHours() % every === 0 && t >= t0) {
@@ -417,7 +467,7 @@ function drawChart(host, spec) {
     days.push([segStart, t1]);
     if (!compact) for (const [a, b] of days) {
       const wseg = x(b) - x(a); if (wseg < 22) continue;
-      svg.appendChild(svgEl('text', { x: (x(a) + x(b)) / 2, y: m.top - 26, 'text-anchor': 'middle', class: 'day-label' }, wseg < 64 ? fmtWd(new Date(a)) : fmtDay(new Date(a))));
+      svg.appendChild(svgEl('text', { x: (x(a) + x(b)) / 2, y: strip - 26, 'text-anchor': 'middle', class: 'day-label' }, wseg < 64 ? fmtWd(new Date(a)) : fmtDay(new Date(a))));
     }
   } else {
     for (let t = Math.ceil(t0 / (30 * 60e3)) * 30 * 60e3; t <= t1; t += 30 * 60e3) {
@@ -430,28 +480,54 @@ function drawChart(host, spec) {
   const nowMs = spec.now ? spec.now.getTime() : null;
   const nowPx = nowMs != null && nowMs >= t0 && nowMs < t1 ? x(nowMs) : null;
   const NOW_GAP = 30; // px, about 12 minutes on the 2-hour chart and 2 hours on a 2,5-day chart
+  const tickEls = []; // bottom time labels; hidden when the marker label would overlap them
   if (!compact) {
     for (const l of labelAt) {
       const px = x(l.t);
       if (px < m.left - 1 || px > W - m.right + 1) continue;
       if (nowPx != null && Math.abs(px - nowPx) < NOW_GAP) continue;
-      svg.appendChild(svgEl('text', { x: px, y: m.top + ph + 15, 'text-anchor': 'middle', class: 'tick' }, l.txt));
+      const tl = svgEl('text', { x: px, y: m.top + ph + 15, 'text-anchor': 'middle', class: 'tick' }, l.txt); tl.dataset.px = px; svg.appendChild(tl); tickEls.push(tl);
     }
-    if (nowPx != null) svg.appendChild(svgEl('text', { x: clamp(nowPx, m.left + 16, W - m.right - 16), y: m.top + ph + 15, 'text-anchor': 'middle', class: 'now-tick' }, fmtTime(spec.now)));
   }
+  // time label under the dashed line (also used while scrubbing)
+  const nowText = svgEl('text', { x: nowPx != null ? clamp(nowPx, m.left + 16, W - m.right - 16) : 0, y: m.top + ph + 15, 'text-anchor': 'middle', class: 'now-tick', visibility: !compact && nowPx != null ? 'visible' : 'hidden' }, nowPx != null ? fmtTime(spec.now) : '');
+  if (!compact) svg.appendChild(nowText);
 
   // sunrise / sunset glyphs in the strip above the plot, dressed with the weather of that hour
   for (const ev of sunEvents) {
-    if (compact || (ev.kind !== 'sunrise' && ev.kind !== 'sunset')) continue;
+    if (compact || spec.icons || (ev.kind !== 'sunrise' && ev.kind !== 'sunset')) continue;
     const px = x(ev.t.getTime());
     if (px < m.left || px > W - m.right) continue;
     const wx = spec.sky.weatherAt ? spec.sky.weatherAt(ev.t) : null;
     const kind = sunWeatherKind(wx);
-    svg.appendChild(sunGlyph(px, m.top - 9, ev.kind, kind, `${ev.kind === 'sunrise' ? 'Zon op' : 'Zon onder'} ${fmtTime(ev.t)} · ${SUN_WORDS[kind]}`));
+    svg.appendChild(sunGlyph(px, strip - 9, ev.kind, kind, `${ev.kind === 'sunrise' ? 'Zon op' : 'Zon onder'} ${fmtTime(ev.t)} · ${SUN_WORDS[kind]}`));
   }
 
-  // "now" marker
-  if (nowPx != null) svg.appendChild(svgEl('line', { class: 'now', x1: nowPx, x2: nowPx, y1: m.top - 2, y2: m.top + ph }));
+  // hourly weather icons (overview): one per hour where there is room, else every 2nd/3rd hour
+  if (spec.icons && !compact) {
+    const pxPerHour = pw / ((t1 - t0) / HOUR);
+    const step = Math.max(1, Math.ceil(18 / pxPerHour));
+    spec.icons.forEach((ic, i) => {
+      if (i % step) return;
+      const px = x(ic.t.getTime());
+      if (px < m.left + 6 || px > W - m.right - 6) return;
+      svg.appendChild(weatherIcon(px, m.top - 12, ic.kind, ic.night));
+    });
+  }
+
+  // "now" marker: the dashed line; while scrubbing it follows the finger and snaps back afterwards
+  const nowLine = svgEl('line', { class: 'now', x1: nowPx || 0, x2: nowPx || 0, y1: m.top - 2, y2: m.top + ph, visibility: nowPx != null ? 'visible' : 'hidden' });
+  svg.appendChild(nowLine);
+  const placeMarker = (px, label) => {
+    nowLine.setAttribute('x1', px); nowLine.setAttribute('x2', px); nowLine.setAttribute('visibility', 'visible');
+    const lx = clamp(px, m.left + 16, W - m.right - 16);
+    nowText.setAttribute('x', lx); nowText.textContent = label; nowText.setAttribute('visibility', compact ? 'hidden' : 'visible');
+    for (const tl of tickEls) tl.setAttribute('visibility', Math.abs(parseFloat(tl.dataset.px) - lx) < NOW_GAP ? 'hidden' : 'visible');
+  };
+  const resetMarker = () => {
+    if (nowPx != null) placeMarker(nowPx, fmtTime(spec.now));
+    else { nowLine.setAttribute('visibility', 'hidden'); nowText.setAttribute('visibility', 'hidden'); }
+  };
 
   // baseline
   svg.appendChild(svgEl('line', { class: 'baseline', x1: m.left, x2: W - m.right, y1: y(sc.min), y2: y(sc.min) }));
@@ -477,7 +553,7 @@ function drawChart(host, spec) {
         const r = Math.min(4, w / 2, hgt);
         const d = `M${xs},${y(sc.min)} V${top + r} a${r},${r} 0 0 1 ${r},-${r} H${xs + w - r} a${r},${r} 0 0 1 ${r},${r} V${y(sc.min)} Z`;
         const el = svgEl('path', { class: s.kind === 'ghost' ? 'ghost' : 'bar', d });
-        if (s.kind === 'bar') el.style.fill = s.color;
+        if (s.kind === 'bar') el.style.fill = s.colorAt ? s.colorAt(p.v) : s.color;
         g.appendChild(el);
         marks.push({ s, p, el });
       }
@@ -540,65 +616,69 @@ function drawChart(host, spec) {
     }
   }
 
-  // hover layer
-  const cross = svgEl('line', { class: 'crosshair', x1: 0, x2: 0, y1: m.top, y2: m.top + ph, visibility: 'hidden' });
-  svg.appendChild(cross);
+  // hover / scrub layer: the dashed line follows the finger, the tooltip shows that moment
   const dots = svgEl('g');
   svg.appendChild(dots);
   const hit = svgEl('rect', { class: 'hit', x: m.left, y: m.top - 16, width: pw, height: ph + 16 + 24 });
   svg.appendChild(hit);
   let lifted = null;
+  if (spec.group) host.dataset.group = spec.group; else delete host.dataset.group;
 
   const lineSeries = spec.series.filter(s => s.kind === 'line');
   const barSeries = spec.series.filter(s => s.kind === 'bar' || s.kind === 'ghost');
 
-  function showAt(clientX) {
-    const rect = svg.getBoundingClientRect();
-    const px = (clientX - rect.left) * (W / rect.width);
-    const t = xInv(clamp(px, m.left, m.left + pw));
+  /* show the readout for time t (ms). silent = only move the marker (used by linked charts). */
+  function showAtTime(t, silent) {
     const tip = tooltipEl();
-    tip.textContent = '';
-    let anchorX, anchorY = m.top;
+    if (!silent) tip.textContent = '';
+    let anchorX, anchorY = m.top, labelT, point = null;
     if (barSeries.length) {
       const base = barSeries[0];
       const p = base.points.find(q => t >= q.t.getTime() && t < q.tEnd.getTime());
-      if (!p) { hideTooltip(); return; }
+      if (!p) { if (!silent) hideTooltip(); return null; }
+      point = p; labelT = p.t;
       anchorX = (x(p.t.getTime()) + x(p.tEnd.getTime())) / 2;
-      tip.appendChild(h('div', 't', spec.tipTime(p)));
-      for (const s of barSeries) {
-        const q = s.points.find(r => r.t.getTime() === p.t.getTime());
-        if (!q || q.v == null) continue;
-        tip.appendChild(tipRow(s, spec.fmt(q.v) + (spec.unitTip ? ' ' + spec.unitTip : ''), q, spec));
-        if (q.v > 0 && s.kind === 'bar') anchorY = Math.min(anchorY, y(q.v));
+      if (!silent) {
+        tip.appendChild(h('div', 't', spec.tipTime(p)));
+        for (const s of barSeries) {
+          const q = s.points.find(r => r.t.getTime() === p.t.getTime());
+          if (!q || q.v == null) continue;
+          tip.appendChild(tipRow(s, spec.fmt(q.v) + (spec.unitTip ? ' ' + spec.unitTip : ''), q, spec));
+          if (q.v > 0 && s.kind === 'bar') anchorY = Math.min(anchorY, y(q.v));
+        }
       }
       if (lifted) lifted.classList.remove('lift');
       const mk = marks.find(k => k.s === base && k.p === p);
       lifted = mk && mk.el; if (lifted) lifted.classList.add('lift');
-      cross.setAttribute('visibility', 'hidden');
     } else {
       const base = lineSeries[0];
+      if (!base) return null;
       const pts = base.points.filter(p => p.v != null);
-      if (!pts.length) return;
+      if (!pts.length) return null;
       let best = pts[0];
       for (const p of pts) if (Math.abs(p.t.getTime() - t) < Math.abs(best.t.getTime() - t)) best = p;
+      point = best; labelT = best.t;
       anchorX = x(best.t.getTime());
-      cross.setAttribute('x1', anchorX); cross.setAttribute('x2', anchorX); cross.setAttribute('visibility', 'visible');
       dots.textContent = '';
-      tip.appendChild(h('div', 't', spec.tipTime(best)));
+      if (!silent) tip.appendChild(h('div', 't', spec.tipTime(best)));
       for (const s of lineSeries) {
         const q = s.points.find(r => r.t.getTime() === best.t.getTime());
         if (!q || q.v == null) continue;
-        tip.appendChild(tipRow(s, spec.fmt(q.v) + (spec.unitTip ? ' ' + spec.unitTip : ''), q, spec));
+        if (!silent) tip.appendChild(tipRow(s, spec.fmt(q.v) + (spec.unitTip ? ' ' + spec.unitTip : ''), q, spec));
         const dot = svgEl('circle', { class: 'dot', cx: anchorX, cy: y(q.v), r: 4 }); dot.style.fill = s.color; dots.appendChild(dot);
         anchorY = Math.min(anchorY, y(q.v));
       }
     }
+    placeMarker(anchorX, fmtTime(labelT));
+    if (spec.onScrub) spec.onScrub(point);
+    if (silent) return point;
     if (spec.sky) {
       const alt = sunAltitude(new Date(t), spec.sky.lat, spec.sky.lon);
       tip.appendChild(h('div', 't', `${sunPhase(alt)} · zon ${alt >= 0 ? fmtNum(alt, 0) + '° boven' : fmtNum(-alt, 0) + '° onder'} de horizon`));
     }
     if (spec.tipExtra) { const ex = spec.tipExtra(t); if (ex) tip.appendChild(h('div', 't', ex)); }
     tip.hidden = false;
+    const rect = svg.getBoundingClientRect();
     const scale = rect.width / W;
     const cx = rect.left + anchorX * scale, cy = rect.top + anchorY * scale;
     const tw = tip.offsetWidth, th = tip.offsetHeight;
@@ -606,15 +686,31 @@ function drawChart(host, spec) {
     let top = cy - th - 12;
     if (top < 8) top = cy + 16;
     tip.style.left = `${left}px`; tip.style.top = `${top}px`;
+    return point;
+  }
+  function showAt(clientX) {
+    const rect = svg.getBoundingClientRect();
+    const px = (clientX - rect.left) * (W / rect.width);
+    const t = xInv(clamp(px, m.left, m.left + pw));
+    showAtTime(t, false);
+    if (spec.group) for (const other of document.querySelectorAll(`.chart[data-group="${spec.group}"]`)) if (other !== host && other._scrubTo) other._scrubTo(t);
+  }
+  function clearLocal() {
+    hideTooltip(); dots.textContent = ''; resetMarker();
+    if (lifted) { lifted.classList.remove('lift'); lifted = null; }
+    if (spec.onScrub) spec.onScrub(null);
   }
   function clear() {
-    hideTooltip(); cross.setAttribute('visibility', 'hidden'); dots.textContent = '';
-    if (lifted) { lifted.classList.remove('lift'); lifted = null; }
+    clearLocal();
+    if (spec.group) for (const other of document.querySelectorAll(`.chart[data-group="${spec.group}"]`)) if (other !== host && other._scrubTo) other._scrubTo(null);
   }
-  hit.addEventListener('pointermove', e => showAt(e.clientX));
-  hit.addEventListener('pointerdown', e => showAt(e.clientX));
-  hit.addEventListener('pointerleave', clear);
-  hit.addEventListener('pointerup', () => setTimeout(clear, 1500));
+  host._scrubTo = t => { if (t == null) clearLocal(); else showAtTime(t, true); };
+  let clearTimer = null;
+  hit.addEventListener('pointermove', e => { clearTimeout(clearTimer); showAt(e.clientX); });
+  hit.addEventListener('pointerdown', e => { clearTimeout(clearTimer); showAt(e.clientX); });
+  hit.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') clear(); });
+  hit.addEventListener('pointerup', () => { clearTimeout(clearTimer); clearTimer = setTimeout(clear, 1800); });
+  hit.addEventListener('pointercancel', clear);
   host.appendChild(svg);
   return { svg, scale: sc };
 }
@@ -684,7 +780,7 @@ const state = { loc: DEFAULT_LOC, tab: 'rain', nowcast: null, forecast: null, up
 try {
   const l = JSON.parse(localStorage.getItem('regen.loc') || 'null');
   if (l && Number.isFinite(l.lat) && Number.isFinite(l.lon)) state.loc = l;
-  const t = localStorage.getItem('regen.tab'); if (t && ['rain', 'temp', 'wind', 'cloud'].includes(t)) state.tab = t;
+  const t = localStorage.getItem('regen.tab'); if (t && ['rain', 'overview', 'temp', 'wind', 'cloud'].includes(t)) state.tab = t;
   const hz = parseFloat(localStorage.getItem('regen.horizon')); if (Number.isFinite(hz) && hz >= HORIZON_MIN) state.horizon = hz;
 } catch (e) {}
 
@@ -776,15 +872,17 @@ async function load() {
 /* ======================================================================
    4. Views
    ====================================================================== */
-const TABS = { rain: 'Regen', temp: 'Temperatuur', wind: 'Wind', cloud: 'Bewolking' };
+const TABS = { rain: 'Regen', overview: 'Overzicht', temp: 'Temperatuur', wind: 'Wind', cloud: 'Bewolking', info: 'Info' };
 
 function render() {
   hideTooltip();
   $('title').textContent = TABS[state.tab];
-  $('subtitle').textContent = state.updated ? `${state.loc.name}${state.loc.admin ? ', ' + state.loc.admin : ''} · bijgewerkt ${fmtTime(state.updated)}` : state.loc.name;
+  $('subtitle').textContent = state.tab === 'info' ? 'Over deze app en haar bronnen' : state.updated ? `${state.loc.name}${state.loc.admin ? ', ' + state.loc.admin : ''} · bijgewerkt ${fmtTime(state.updated)}` : state.loc.name;
+  const infoBtn = $('infoBtn'); if (infoBtn) infoBtn.hidden = state.tab === 'info';
+  $('sunline').hidden = state.tab === 'info';
   document.title = `${TABS[state.tab]} · ${state.loc.name}`;
   for (const btn of document.querySelectorAll('.tab')) btn.setAttribute('aria-pressed', String(btn.dataset.tab === state.tab));
-  renderSunline();
+  if (state.tab !== 'info') renderSunline();
   const c = $('content');
   const screen = $('screen');
   const keepScroll = screen.scrollTop; // rebuilding the content must not move the page
@@ -795,7 +893,7 @@ function render() {
       if (!state.updated) { for (let i = 0; i < 2; i++) { const k = h('section', 'card'); k.appendChild(h('div', 'skeleton')); c.appendChild(k); } return; }
       const e = h('p', 'empty', 'Geen data beschikbaar. ' + Object.values(state.errors).join(' · ')); c.appendChild(e); return;
     }
-    ({ rain: renderRain, temp: renderTemp, wind: renderWind, cloud: renderCloud })[state.tab](c);
+    ({ rain: renderRain, overview: renderOverview, temp: renderTemp, wind: renderWind, cloud: renderCloud, info: renderInfo })[state.tab](c);
   } finally {
     c.style.minHeight = '';
     if (screen.scrollTop !== keepScroll) screen.scrollTop = keepScroll;
@@ -867,16 +965,17 @@ function horizonFoot(models) {
 }
 /* Time span of the multi-day charts: from the current hour up to the model horizon, or shorter when the
    user zoomed in. The start never moves: zooming is "nu t/m x uur vooruit". */
+const HORIZON_MAX = 48; // de app kijkt nooit verder dan 48 uur vooruit
 function maxHorizonHours() {
   const avail = modelsAvail();
-  if (!avail.length) return 60;
+  if (!avail.length) return HORIZON_MAX;
   const start = state.forecast.startHour.getTime();
-  return Math.max(...avail.map(m => (m.horizon.getTime() - start) / HOUR));
+  return Math.min(HORIZON_MAX, Math.max(...avail.map(m => (m.horizon.getTime() - start) / HOUR)));
 }
 function spanFor(models) {
-  // full model range; drawChart applies the zoom horizon itself so charts can be redrawn in place
+  // range up to 48 h; drawChart applies the zoom horizon itself so charts can be redrawn in place
   const start = state.forecast.startHour;
-  const end = Math.max(...models.map(m => m.horizon.getTime()));
+  const end = Math.min(start.getTime() + HORIZON_MAX * HOUR, Math.max(...models.map(m => m.horizon.getTime())));
   return { tMin: start, tMax: new Date(end) };
 }
 function setHorizon(hours, persist = true) {
@@ -891,7 +990,7 @@ function setHorizon(hours, persist = true) {
   const cur = hz == null ? max : hz;
   const end = new Date(state.forecast.startHour.getTime() + cur * HOUR);
   const val = document.querySelector('.hz-val');
-  if (val) val.textContent = hz == null ? `alles · t/m ${fmtDayTime(end)}` : `${Math.round(cur)} u · t/m ${fmtDayTime(end)}`;
+  if (val) val.textContent = `${Math.round(cur)} u · t/m ${fmtDayTime(end)}`;
 }
 function horizonBar() {
   const bar = h('div', 'horizon');
@@ -900,25 +999,25 @@ function horizonBar() {
   const end = new Date(state.forecast.startHour.getTime() + cur * HOUR);
   const lbl = h('div', 'hz-label');
   lbl.appendChild(h('span', 'hz-title', 'Vooruit'));
-  lbl.appendChild(h('span', 'hz-val', state.horizon == null ? `alles · t/m ${fmtDayTime(end)}` : `${Math.round(cur)} u · t/m ${fmtDayTime(end)}`));
+  lbl.appendChild(h('span', 'hz-val', `${Math.round(cur)} u · t/m ${fmtDayTime(end)}`));
   bar.appendChild(lbl);
   const seg = h('div', 'segmented compact');
-  const presets = [[12, '12 u'], [24, '24 u'], [48, '48 u'], [null, 'Alles']];
+  const presets = [[6, '6 u'], [12, '12 u'], [24, '24 u'], [48, '48 u']];
   for (const [hrs, label] of presets) {
     const btn = h('button', null, label); btn.type = 'button';
-    const active = hrs == null ? state.horizon == null : Math.abs(cur - hrs) < 0.5 && state.horizon != null;
+    const active = Math.abs(cur - hrs) < 0.5;
     btn.setAttribute('aria-pressed', String(active));
-    btn.disabled = hrs != null && hrs >= max;
-    btn.addEventListener('click', () => setHorizon(hrs));
+    btn.disabled = hrs > max + 0.5;
+    btn.addEventListener('click', () => setHorizon(hrs >= max ? null : hrs));
     seg.appendChild(btn);
   }
   bar.appendChild(seg);
   bar.appendChild(h('p', 'hz-hint', 'Knijp op een grafiek om in of uit te zoomen; de keuze wordt onthouden.'));
   return bar;
 }
-function spanTitle(modelHours) {
-  if (state.horizon && state.horizon < modelHours - 1) return `Komende ${Math.round(state.horizon)} uur`;
-  return modelHours >= 54 ? 'Komende 2,5 dag' : 'Komende 2 dagen';
+function spanTitle() {
+  const cur = state.horizon == null ? maxHorizonHours() : state.horizon;
+  return `Komende ${Math.round(cur)} uur`;
 }
 function errorNote(parent, key, what) {
   if (state.errors[key]) parent.appendChild(h('p', 'empty', `${what} niet beschikbaar (${state.errors[key]})`));
@@ -942,7 +1041,7 @@ function renderRain(c) {
   else if (nextH) {
     const pr = probAt(nextH.t);
     big.textContent = fmtDayTime(nextH.t);
-    hint.textContent = `${fmtMm(nextH.precipitation)} mm in dat uur · HARMONIE${pr != null ? ` · kans ${Math.round(pr * 10) * 10}%` : ''}`;
+    hint.textContent = `${fmtMm(nextH.precipitation)} mm in dat uur${pr != null ? ` · kans ${Math.round(pr * 10) * 10}%` : ''}`;
   }
   else if (H && H.applicable) { big.textContent = 'Droog'; hint.textContent = `geen neerslag verwacht t/m ${fmtDayTime(H.horizon)}`; }
   else { big.textContent = '–'; }
@@ -950,7 +1049,7 @@ function renderRain(c) {
   c.appendChild(hero);
 
   // nowcast card
-  const k1 = card('Komende 2 uur', ['Radar-nowcast · per 5 min · ', b('Buienradar')]);
+  const k1 = card('Komende 2 uur', ['Radar · per 5 minuten']);
   c.appendChild(k1.el);
   if (nc && nc.length) {
     const tMin = new Date(Math.min(now.getTime(), nc[0].t.getTime())), tMax = new Date(nc[nc.length - 1].t.getTime() + MIN5); // start at 'nu' so the now-line sits at the left edge
@@ -963,20 +1062,19 @@ function renderRain(c) {
     });
     k1.tableHost.appendChild(dataTable(pts, [{ label: 'Tijd', get: p => fmtTime(p.t) }, { label: 'mm/u', num: true, get: p => fmtNum(p.v, 2) }]));
     const sum2 = nc.reduce((s, p) => s + p.v / 12, 0);
-    k1.el.appendChild(h('p', 'foot', `Som over 2 uur: ${fmtNum(sum2, 1)} mm · staaf = intensiteit op dat moment`));
   } else errorNote(k1.body, 'nowcast', 'Radar');
 
   // HARMONIE card
   c.appendChild(horizonBar());
   const k2 = card('Komende dagen', []);
   c.appendChild(k2.el);
-  if (!H || !H.applicable) { errorNote(k2.body, 'forecast', 'Modelverwachting'); if (!state.errors.forecast) k2.body.appendChild(h('p', 'empty', 'HARMONIE dekt deze locatie niet.')); return; }
-  k2.el.querySelector('h2').textContent = spanTitle(H.hours);
-  k2.el.querySelector('.meta').append(b(H.long), ` · ${H.res} · per uur`);
+  if (!H || !H.applicable) { errorNote(k2.body, 'forecast', 'Modelverwachting'); if (!state.errors.forecast) k2.body.appendChild(h('p', 'empty', 'Geen verwachting voor deze locatie.')); return; }
+  k2.el.querySelector('h2').textContent = spanTitle();
+  k2.el.querySelector('.meta').append('Verwachting per uur');
   const modelPts = m => m.interval.map(p => ({ t: p.t, tEnd: p.tEnd, v: p.precipitation, rain: p.rain, snow: p.snowfall }));
   drawChart(k2.body, { sky: skyOf(),
     ...spanFor([H]), unit: 'mm/u', unitTip: 'mm', ticks: 'days', now, yOpts: { zero: true, minSpan: 1, headroom: 1.15 },
-    series: [{ kind: 'bar', name: 'HARMONIE', color: 'var(--s1)', points: modelPts(H) }], fmt: fmtMm, directLabels: 'peak',
+    series: [{ kind: 'bar', name: 'Neerslag', color: 'var(--s1)', points: modelPts(H) }], fmt: fmtMm, directLabels: 'peak', group: 'rain',
     tipTime: p => `${fmtWd(p.t)} ${fmtHourRange(p.t)}`,
     tipNote: (s, p) => { const pr = probAt(p.t); return (pr != null ? ` · kans ${Math.round(pr * 100)}%` : '') + (p.snow > 0 ? ` · sneeuw ${fmtNum(p.snow, 1)} cm` : ''); },
     aria: 'Neerslag per uur volgens HARMONIE',
@@ -989,26 +1087,24 @@ function renderRain(c) {
     k2.body.after(sub);
     // each probability covers an hour; plot it at the middle of that hour so the curve sits over its bar
     const pts = e.prob.map(p => ({ t: new Date(p.t.getTime() + HOUR / 2), tEnd: p.tEnd, v: Math.round(p.v * 100), row: p }));
-    drawChart(sub, { sky: skyOf(), compact: true,
+    drawChart(sub, { sky: skyOf(), compact: true, group: 'rain',
       ...spanFor([H]), unit: '%', unitTip: '%', ticks: 'days', now, yFixed: { min: 0, max: 100, step: 50 }, height: 92,
       series: [{ kind: 'line', name: 'Kans op regen', color: 'var(--s1)', points: pts, smooth: true, area: true, areaOpacity: 0.14 }], fmt: v => fmtNum(v, 0),
       tipTime: p => `${fmtWd(p.row.t)} ${fmtHourRange(p.row.t)}`,
-      tipNote: (s, p) => { const hr = H.interval.find(q => q.t.getTime() === p.row.t.getTime()); return hr ? ` · HARMONIE ${fmtMm(hr.precipitation)} mm` : ''; },
+      tipNote: (s, p) => { const hr = H.interval.find(q => q.t.getTime() === p.row.t.getTime()); return hr ? ` · verwacht ${fmtMm(hr.precipitation)} mm` : ''; },
       aria: 'Kans op regen per uur volgens het ICON-D2-ensemble',
     });
-    legend(k2.el, [{ name: 'Neerslag per uur', color: 'var(--s1)', rect: true, note: 'HARMONIE' }, { name: 'Kans op regen', color: 'var(--s1)', note: `${ENS.long}, ${e.members} leden` }]);
-    k2.el.appendChild(h('p', 'foot', `HARMONIE t/m ${fmtDayTime(H.horizon)} · staaf = som over dat uur · kans = aandeel leden met ≥ 0,1 mm, t/m ${fmtDayTime(e.horizon)}`));
+    legend(k2.el, [{ name: 'Neerslag per uur', color: 'var(--s1)', rect: true }, { name: 'Kans op regen', color: 'var(--s1)' }]);
   } else {
-    k2.el.appendChild(h('p', 'foot', `t/m ${fmtDayTime(H.horizon)} · staaf = som over dat uur${state.errors.ens ? ` · kans niet beschikbaar (${state.errors.ens})` : ''}`));
   }
 
   // stats
   const sum = (arr, n) => arr.slice(0, n).reduce((s, p) => s + p.precipitation, 0);
   const stats = h('section', 'stats');
   const st = (l, v, hh) => { const s = h('div', 'stat'); s.appendChild(h('div', 'l', l)); s.appendChild(h('div', 'v', v)); s.appendChild(h('div', 'h', hh)); stats.appendChild(s); };
-  st('Komende 24 u', `${fmtMm(sum(H.interval, 24))} mm`, 'HARMONIE');
-  st('Komende 48 u', `${fmtMm(sum(H.interval, 48))} mm`, 'HARMONIE');
-  st('Tot horizon', `${fmtMm(sum(H.interval, 999))} mm`, `t/m ${fmtDayTime(H.horizon)}`);
+  st('Komende 24 u', `${fmtMm(sum(H.interval, 24))} mm`, 'verwacht');
+  st('Komende 48 u', `${fmtMm(sum(H.interval, 48))} mm`, 'verwacht');
+
   c.appendChild(stats);
 }
 /* 10–90 %-band uit het ensemble als eerste reeks van een lijngrafiek */
@@ -1017,7 +1113,7 @@ function ensBand(v, color = 'var(--s1)') {
   if (!e || !e.bands[v] || !e.bands[v].length) return [];
   return [{ kind: 'band', name: 'ensemble', color, points: e.bands[v].map(r => ({ t: r.t, lo: r.lo, hi: r.hi })) }];
 }
-function ensLegend(color = 'var(--s1)') { return state.ens ? [{ name: `10–90% van ${state.ens.members} leden ${ENS.long}`, color, band: true }] : []; }
+function ensLegend(color = 'var(--s1)') { return state.ens ? [{ name: 'Onzekerheid (10–90%)', color, band: true }] : []; }
 function ensFoot(H) { return state.ens ? ` · band t/m ${fmtDayTime(state.ens.horizon)}` : ''; }
 
 /* ---------------- shared for temp/wind/cloud ---------------- */
@@ -1060,8 +1156,151 @@ function needHarmonie(c) {
   const H = state.forecast && state.forecast.models.harmonie;
   if (H && H.applicable) return H;
   errorNote(c, 'forecast', 'Modelverwachting');
-  if (!state.errors.forecast) c.appendChild(h('p', 'empty', 'HARMONIE dekt deze locatie niet.'));
+  if (!state.errors.forecast) c.appendChild(h('p', 'empty', 'Geen verwachting voor deze locatie.'));
   return null;
+}
+
+/* ---------------- Overzicht: temperatuur per uur met weericoontjes ---------------- */
+function hourIcons(H) {
+  return H.instant.map(r => {
+    const iv = H.interval.find(p => p.t.getTime() === r.t.getTime());
+    const kind = sunWeatherKind({ cloud: r.cloud_cover, rain: iv ? iv.precipitation : null });
+    const mid = new Date(r.t.getTime() + HOUR / 2);
+    return { t: mid, kind, night: sunAltitude(mid, state.loc.lat, state.loc.lon) < SUN_RISESET, hour: r.t };
+  });
+}
+function renderOverview(c) {
+  const H = needHarmonie(c); if (!H) return;
+  const now = new Date();
+  const o = state.obs, r0 = H.instant[0];
+  const kind0 = sunWeatherKind(weatherAt(now));
+  const night0 = sunAltitude(now, state.loc.lat, state.loc.lon) < SUN_RISESET;
+  const word0 = kind0 === 'clear' && night0 ? 'helder' : ICON_WORDS[kind0];
+  const today = H.instant.filter(p => p.t.getDate() === r0.t.getDate());
+  const mx = Math.max(...today.map(p => p.temperature_2m)), mn = Math.min(...today.map(p => p.temperature_2m));
+  const temp = o && o.temp != null ? o.temp : r0.temperature_2m;
+  heroBlock(c, '<svg class="ico-big" viewBox="0 0 24 24"><circle cx="9" cy="9" r="3.6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M9 2.5v1.6M9 13.9v1.6M2.5 9h1.6M13.9 9h1.6M4.4 4.4l1.1 1.1M12.5 12.5l1.1 1.1M4.4 13.6l1.1-1.1M12.5 5.5l1.1-1.1" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M12 20.5a3.2 3.2 0 0 1-.4-6.37A4.3 4.3 0 0 1 19.9 13h.3a2.9 2.9 0 0 1 0 5.8H12z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
+    o && o.temp != null ? `Gemeten ${fmtTime(o.time)} · ${o.station}` : `Nu · ${fmtTime(r0.t)} · verwacht`,
+    `${fmtNum(temp, 0)}° · ${word0}`, `voelt als ${fmtNum(o && o.feel != null ? o.feel : r0.apparent_temperature, 0)}° · vandaag ${fmtNum(mn, 0)}° tot ${fmtNum(mx, 0)}°`);
+
+  c.appendChild(horizonBar());
+  const k = card(spanTitle(), ['Temperatuur per uur, met het weerbeeld van dat uur']);
+  c.appendChild(k.el);
+  const icons = hourIcons(H);
+  const pts = H.instant.map(r => ({ t: r.t, tEnd: new Date(r.t.getTime() + HOUR), v: r.temperature_2m, row: r }));
+  const iconFor = p => icons.find(i => i.hour.getTime() === p.t.getTime());
+  drawChart(k.body, { sky: skyOf(), group: 'overview',
+    ...spanFor([H]), unit: '°C', unitTip: '°C', ticks: 'days', now, yFixed: niceScale(Math.min(...pts.map(p => p.v)) - 6, Math.max(...pts.map(p => p.v)) + 1, { minSpan: 10, targetTicks: 4 }), icons,
+    series: [{ kind: 'bar', name: 'Temperatuur', color: 'var(--s1)', colorAt: tempColor, points: pts }],
+    fmt: v => fmtNum(v, 0), directLabels: 'minmax', tipTime: p => `${fmtWd(p.t)} ${fmtHourRange(p.t)}`,
+    tipNote: (s, p) => { const ic = iconFor(p); const iv = H.interval.find(q => q.t.getTime() === p.t.getTime()); return (ic ? ` · ${ic.kind === 'clear' && ic.night ? 'helder' : ICON_WORDS[ic.kind]}` : '') + (iv && iv.precipitation >= 0.1 ? ` · ${fmtMm(iv.precipitation)} mm` : ''); },
+    aria: 'Temperatuur per uur met weericoontjes',
+  });
+  const sub = h('div', 'chart sub');
+  k.body.after(sub);
+  const rain = H.interval.map(p => ({ t: p.t, tEnd: p.tEnd, v: p.precipitation }));
+  drawChart(sub, { sky: skyOf(), group: 'overview', compact: true,
+    ...spanFor([H]), unit: 'mm', unitTip: 'mm', ticks: 'days', now, yOpts: { zero: true, minSpan: 1, headroom: 1.15 }, height: 78,
+    series: [{ kind: 'bar', name: 'Neerslag', color: 'var(--s1)', points: rain }], fmt: fmtMm, tipTime: p => `${fmtWd(p.t)} ${fmtHourRange(p.t)}`,
+    aria: 'Neerslag per uur',
+  });
+  legend(k.el, [{ name: 'Temperatuur', color: 'var(--s2)', rect: true, note: 'blauw = koud, oranje = warm' }, { name: 'Neerslag per uur', color: 'var(--s1)', rect: true }, { name: 'Icoontje = weerbeeld van dat uur', color: 'var(--label-3)', rect: true }]);
+  k.tableHost.appendChild(dataTable(H.instant, [{ label: 'Uur', get: p => fmtDayTime(p.t) }, { label: '°C', num: true, get: p => fmtNum(p.temperature_2m, 0) }, { label: 'Weer', get: p => { const ic = icons.find(i => i.hour.getTime() === p.t.getTime()); return ic ? (ic.kind === 'clear' && ic.night ? 'helder' : ICON_WORDS[ic.kind]) : ''; } }, { label: 'mm', num: true, get: p => { const iv = H.interval.find(q => q.t.getTime() === p.t.getTime()); return iv ? fmtNum(iv.precipitation, 1) : '–'; } }]));
+}
+
+/* ---------------- Boom: wat de wind met een boom doet (KNMI-schaal van Beaufort) ---------------- */
+const BEAUFORT = [
+  ['Windstil', 'rook stijgt recht omhoog'],
+  ['Zwakke wind', 'rook geeft de windrichting aan'],
+  ['Zwakke wind', 'bladeren ritselen, wind voelbaar in het gezicht'],
+  ['Matige wind', 'bladeren en twijgen bewegen voortdurend'],
+  ['Matige wind', 'takken bewegen, stof en papier waaien op'],
+  ['Vrij krachtige wind', 'bomen met bladeren zwaaien'],
+  ['Krachtige wind', 'grote takken bewegen, een paraplu is lastig te gebruiken'],
+  ['Harde wind', 'hele bomen bewegen, tegen de wind in lopen is lastig'],
+  ['Stormachtige wind', 'twijgen breken van de bomen, lopen is zeer moeilijk'],
+  ['Storm', 'dakpannen waaien weg, takken breken af'],
+  ['Zware storm', 'bomen worden ontworteld, grote schade'],
+  ['Zeer zware storm', 'uitgebreide schade aan bossen en gebouwen'],
+  ['Orkaan', 'verwoestingen'],
+];
+const TREE = {
+  amp:    [0, 0.4, 1, 2, 3.5, 5, 7, 9, 12, 15, 18, 22, 26],   // zwaai-amplitude in graden
+  lean:   [0, 0, 1, 2, 4, 6, 9, 12, 16, 20, 25, 30, 35],       // scheefstand in graden
+  period: [4, 3.6, 3.2, 2.8, 2.4, 2, 1.7, 1.4, 1.2, 1, 0.9, 0.8, 0.7], // zwaaiperiode in seconden
+};
+function treeView() {
+  const wrap = h('div', 'tree');
+  const svg = svgEl('svg', { viewBox: '0 0 160 120', 'aria-hidden': 'true' });
+  svg.appendChild(svgEl('line', { class: 'ground', x1: 20, x2: 140, y1: 108, y2: 108 }));
+  const trunk = svgEl('g', { class: 'trunk' });
+  trunk.appendChild(svgEl('path', { class: 'bark', d: 'M76 108 L78 72 Q80 60 82 72 L84 108 Z' }));
+  const canopy = svgEl('g', { class: 'canopy' });
+  for (const [cx, cy, r] of [[80, 50, 22], [62, 62, 16], [98, 62, 16], [70, 42, 13], [92, 42, 13]]) canopy.appendChild(svgEl('circle', { class: 'blob', cx, cy, r }));
+  // individual leaves that flutter
+  for (let i = 0; i < 14; i++) {
+    const a = (i / 14) * Math.PI * 2, rr = 10 + (i % 3) * 5;
+    canopy.appendChild(svgEl('ellipse', { class: 'leaf', cx: (80 + Math.cos(a) * rr).toFixed(1), cy: (52 + Math.sin(a) * rr * 0.8).toFixed(1), rx: 2.6, ry: 1.4, transform: `rotate(${(i * 37) % 180} ${(80 + Math.cos(a) * rr).toFixed(1)} ${(52 + Math.sin(a) * rr * 0.8).toFixed(1)})` }));
+  }
+  trunk.appendChild(canopy);
+  svg.appendChild(trunk);
+  const flyers = svgEl('g', { class: 'flyers' });
+  for (let i = 0; i < 5; i++) flyers.appendChild(svgEl('ellipse', { class: 'flyer', cx: 80 + (i - 2) * 6, cy: 46 + (i % 2) * 10, rx: 2.6, ry: 1.4, style: `animation-delay:${(-i * 0.37).toFixed(2)}s` }));
+  svg.appendChild(flyers);
+  wrap.appendChild(svg);
+  const txt = h('div', 'tree-text');
+  txt.appendChild(h('div', 'tree-caption'));
+  txt.appendChild(h('div', 'tree-desc'));
+  wrap.appendChild(txt);
+  return wrap;
+}
+function setTree(el, kmh, dirDeg, label) {
+  const b = beaufort(kmh || 0);
+  const dx = Math.sin(rad((dirDeg == null ? 270 : dirDeg) + 180)); // wind blows TO dir+180; +x = naar rechts
+  const sign = Math.abs(dx) < 0.3 ? (dx < 0 ? -0.3 : 0.3) : dx;
+  el.style.setProperty('--amp', `${TREE.amp[b]}deg`);
+  el.style.setProperty('--lean', `${(TREE.lean[b] * sign).toFixed(1)}deg`);
+  el.style.setProperty('--period', `${TREE.period[b]}s`);
+  el.style.setProperty('--dx', sign.toFixed(2));
+  el.classList.toggle('flying', b >= 5);
+  el.classList.toggle('still', b === 0);
+  el.dataset.bft = b;
+  el.querySelector('.tree-caption').textContent = `${label} · ${fmtNum(kmh || 0, 0)} km/u · ${b} Bft`;
+  el.querySelector('.tree-desc').textContent = `${BEAUFORT[b][0]}: ${BEAUFORT[b][1]}`;
+}
+
+/* ---------------- Info: alles over de app, als verborgen tab ---------------- */
+function renderInfo(c) {
+  const sec = (title, paras) => {
+    const s = h('section', 'card info');
+    s.appendChild(h('h2', null, title));
+    for (const p of paras) { const el = h('p'); el.innerHTML = p; s.appendChild(el); }
+    c.appendChild(s);
+  };
+  sec('Wat je ziet', [
+    'De app toont de verwachting voor de komende 48 uur voor de gekozen plaats. <b>Regen</b> begint met de radar voor de komende 2 uur (per 5 minuten) en daaronder de neerslag per uur met de kans op regen. <b>Overzicht</b> zet temperatuur en weerbeeld per uur naast elkaar. <b>Temperatuur</b>, <b>Wind</b> en <b>Bewolking</b> tonen elk hun eigen verloop.',
+    'Zoomen: knijp met twee vingers op een grafiek, of kies 6, 12, 24 of 48 uur. De grafiek begint altijd bij nu; de keuze wordt onthouden. Sleep met één vinger over een grafiek om de waarden van dat moment te zien; de stippellijn volgt je vinger.',
+    'De achtergrond van elke grafiek volgt de zon: warm bij daglicht, grijzer naarmate er meer bewolking is, donker in de nacht, met schemer ertussen. De zonnetjes boven de grafiek staan op zonsopkomst en -ondergang en tonen het weerbeeld van dat moment.',
+  ]);
+  sec('Waar de cijfers vandaan komen', [
+    '<b>Nu-waarden</b> (temperatuur, wind) zijn echte metingen van het dichtstbijzijnde KNMI-weerstation, elke 10 minuten bijgewerkt, via de feed van Buienradar. De tegel noemt het station en de afstand.',
+    '<b>Radar</b> voor de komende 2 uur: Buienradar-nowcast, een verplaatsing van het actuele radarbeeld.',
+    '<b>Verwachting per uur</b> (neerslag, temperatuur, wind, bewolking): het KNMI-weermodel HARMONIE-AROME, dat elk uur opnieuw rekent op een raster van 2 bij 2 km. In een eigen verificatie tegen KNMI-metingen bleek dit model voor regen op 1 tot 2 dagen vooruit het beste van de fijnmazige modellen; voor temperatuur is het gemiddeld een halve graad te warm.',
+    '<b>Kans op regen</b> en de <b>onzekerheidsband</b>: het ensemble ICON-D2-EPS van de Duitse weerdienst, twintig berekeningen met kleine verschillen in de beginsituatie. De kans is het aandeel berekeningen met minstens 0,1 mm in dat uur; de band toont waar 80% van de berekeningen zit. Het model zelf blijft de verwachting; het ensemble zegt alleen hoe zeker die is.',
+    'Modeldata loopt via <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a>. Zonsopkomst, schemer en zonshoogte worden in de app zelf berekend.',
+  ]);
+  sec('Hoe je de grafieken leest', [
+    'Een <b>neerslagstaaf</b> is de som over dat uur; de radarstaven zijn de intensiteit op dat moment, in millimeter per uur. Lichte regen is 0,1 tot 1 mm per uur, matige regen 1 tot 4, zware regen meer dan 4.',
+    '<b>Windpijlen</b> wijzen waarheen de wind waait; in de tekst staat waar de wind vandaan komt, zoals gebruikelijk. Beaufort volgt uit de uursnelheid volgens de KNMI-tabel; de boom laat zien wat die kracht met een boom doet.',
+    '<b>Bewolking</b> is het deel van de hemel dat bedekt is. De lijn wordt donkerder grijs naarmate er meer bewolking is.',
+  ]);
+  sec('Beaufort volgens KNMI', [
+    '<table class="bft">' + BEAUFORT.map((b, i) => `<tr><td class="num">${i}</td><td>${b[0]}</td><td>${b[1]}</td></tr>`).join('') + '</table>',
+  ]);
+  sec('Bronnen en licenties', [
+    'Verwachting: KNMI, via Open-Meteo (CC BY 4.0). Ensemble: DWD ICON-D2-EPS, via Open-Meteo (CC BY 4.0). Radar en stationsmetingen: <a href="https://www.buienradar.nl" target="_blank" rel="noopener">Buienradar.nl</a>. Open-Meteo wordt gebruikt onder de voorwaarden voor niet-commercieel gebruik.',
+    'Deze app is een privéprototype. Instellingen zoals plaats en zoom blijven op je eigen telefoon; er worden geen gegevens verzameld.',
+  ]);
 }
 
 /* ---------------- Temperatuur ---------------- */
@@ -1074,13 +1313,13 @@ function renderTemp(c) {
   const tempIcon = '<svg class="ico-big" viewBox="0 0 24 24"><path d="M10 4a2 2 0 0 1 4 0v9.3a4 4 0 1 1-4 0V4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="17" r="1.6" fill="currentColor"/><path d="M12 10v7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
   if (o && o.temp != null) {
     heroBlock(c, tempIcon, `Gemeten ${fmtTime(o.time)} · ${o.station} (${fmtNum(o.dist, 0)} km)`, `${fmtNum(o.temp, 0)}°`,
-      `voelt als ${fmtNum(o.feel != null ? o.feel : nowRow.apparent_temperature, 0)}° · HARMONIE nu ${fmtNum(nowRow.temperature_2m, 0)}° · vandaag ${fmtNum(mn, 0)}° tot ${fmtNum(mx, 0)}°`);
+      `voelt als ${fmtNum(o.feel != null ? o.feel : nowRow.apparent_temperature, 0)}° · verwacht nu ${fmtNum(nowRow.temperature_2m, 0)}° · vandaag ${fmtNum(mn, 0)}° tot ${fmtNum(mx, 0)}°`);
   } else {
-    heroBlock(c, tempIcon, `Nu · ${fmtTime(nowRow.t)} · model`, `${fmtNum(nowRow.temperature_2m, 0)}°`, `voelt als ${fmtNum(nowRow.apparent_temperature, 0)}° · vandaag ${fmtNum(mn, 0)}° tot ${fmtNum(mx, 0)}°`);
+    heroBlock(c, tempIcon, `Nu · ${fmtTime(nowRow.t)} · verwacht`, `${fmtNum(nowRow.temperature_2m, 0)}°`, `voelt als ${fmtNum(nowRow.apparent_temperature, 0)}° · vandaag ${fmtNum(mn, 0)}° tot ${fmtNum(mx, 0)}°`);
   }
 
   c.appendChild(horizonBar());
-  const k1 = card(spanTitle(H.hours), [b('KNMI HARMONIE-AROME'), ' · 2 km · per uur']);
+  const k1 = card(spanTitle(), ['Verwachting per uur']);
   c.appendChild(k1.el);
   drawChart(k1.body, { sky: skyOf(),
     ...spanFor([H]), unit: '°C', unitTip: '°C', ticks: 'days', now: new Date(), yOpts: { minSpan: 6, targetTicks: 4 },
@@ -1094,7 +1333,6 @@ function renderTemp(c) {
   });
   legend(k1.el, [{ name: 'Temperatuur (2 m)', color: 'var(--s1)' }, { name: 'Gevoelstemperatuur', color: 'var(--s1)', dashed: true }, ...ensLegend()]);
   k1.tableHost.appendChild(dataTable(H.instant, [{ label: 'Uur', get: p => fmtDayTime(p.t) }, { label: '°C', num: true, get: p => fmtNum(p.temperature_2m, 1) }, { label: 'Gevoel', num: true, get: p => fmtNum(p.apparent_temperature, 1) }]));
-  k1.el.appendChild(h('p', 'foot', `t/m ${fmtDayTime(H.horizon)}${ensFoot(H)}`));
 }
 
 /* ---------------- Wind ---------------- */
@@ -1105,13 +1343,13 @@ function renderWind(c) {
   const windIcon = '<svg class="ico-big" viewBox="0 0 24 24"><path d="M3 8h11a2.5 2.5 0 1 0-2.5-2.5M3 12h15a2.5 2.5 0 1 1-2.5 2.5M3 16h8a2 2 0 1 1-2 2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
   if (o && o.wind != null) {
     heroBlock(c, windIcon, `Gemeten ${fmtTime(o.time)} · ${o.station} (${fmtNum(o.dist, 0)} km)`, `${fmtNum(o.wind, 0)} km/u`,
-      `${beaufort(o.wind)} Bft${o.dir != null ? ` uit ${compass(o.dir)} (${fmtDeg(o.dir)})` : ''}${o.gust != null ? ` · stoten ${fmtNum(o.gust, 0)} km/u` : ''} · HARMONIE nu ${fmtNum(r0.wind_speed_10m, 0)} km/u`);
+      `${beaufort(o.wind)} Bft${o.dir != null ? ` uit ${compass(o.dir)} (${fmtDeg(o.dir)})` : ''}${o.gust != null ? ` · stoten ${fmtNum(o.gust, 0)} km/u` : ''} · verwacht nu ${fmtNum(r0.wind_speed_10m, 0)} km/u`);
   } else {
-    heroBlock(c, windIcon, `Nu · ${fmtTime(r0.t)} · model`, `${fmtNum(r0.wind_speed_10m, 0)} km/u`, `${beaufort(r0.wind_speed_10m)} Bft uit ${compass(r0.wind_direction_10m)} (${fmtDeg(r0.wind_direction_10m)}) · stoten ${fmtNum(r0.wind_gusts_10m, 0)} km/u`);
+    heroBlock(c, windIcon, `Nu · ${fmtTime(r0.t)} · verwacht`, `${fmtNum(r0.wind_speed_10m, 0)} km/u`, `${beaufort(r0.wind_speed_10m)} Bft uit ${compass(r0.wind_direction_10m)} (${fmtDeg(r0.wind_direction_10m)}) · stoten ${fmtNum(r0.wind_gusts_10m, 0)} km/u`);
   }
 
   c.appendChild(horizonBar());
-  const k1 = card(spanTitle(H.hours), [b('KNMI HARMONIE-AROME'), ' · 2 km · wind op 10 m']);
+  const k1 = card(spanTitle(), ['Verwachting per uur · wind op 10 m hoogte']);
   c.appendChild(k1.el);
   const arrows = H.instant.filter(p => p.t.getHours() % 3 === 0 && p.wind_direction_10m != null).map(p => ({ t: p.t, deg: p.wind_direction_10m }));
   drawChart(k1.body, { sky: skyOf(),
@@ -1123,12 +1361,17 @@ function renderWind(c) {
     ],
     fmt: v => fmtNum(v, 0), directLabels: 'peak', arrows, tipTime: p => fmtDayTime(p.t),
     tipNote: (s, p) => (s.name === 'Wind' ? ` · ${beaufort(p.v)} Bft · ${compass(p.row.wind_direction_10m)}` : ''),
-    tipExtra: t => { const r = state.ens && state.ens.bands.wind_speed_10m.find(q => Math.abs(q.t.getTime() - t) < HOUR / 2); return r ? `ensemble ${fmtNum(r.lo, 0)} tot ${fmtNum(r.hi, 0)} km/u` : null; },
+    tipExtra: t => { const r = state.ens && state.ens.bands.wind_speed_10m.find(q => Math.abs(q.t.getTime() - t) < HOUR / 2); return r ? `onzekerheid ${fmtNum(r.lo, 0)} tot ${fmtNum(r.hi, 0)} km/u` : null; },
+    onScrub: p => { if (p) setTree(tree, p.v, p.row.wind_direction_10m, fmtDayTime(p.t)); else treeNow(); },
     aria: 'Windsnelheid en windstoten per uur volgens HARMONIE',
   });
+  // the tree under the arrows: what this wind does to a tree, for now or for the hour under your finger
+  const tree = treeView();
+  const treeNow = () => (o && o.wind != null ? setTree(tree, o.wind, o.dir, `Nu, gemeten ${fmtTime(o.time)}`) : setTree(tree, r0.wind_speed_10m, r0.wind_direction_10m, `Nu, verwacht`));
+  treeNow();
+  k1.body.after(tree);
   legend(k1.el, [{ name: 'Windsnelheid', color: 'var(--s1)' }, { name: 'Windstoten', color: 'var(--s1)', dashed: true }, ...ensLegend(), { name: 'Pijl: richting waarheen de wind waait, elke 3 u', color: 'var(--label-3)' }]);
   k1.tableHost.appendChild(dataTable(H.instant, [{ label: 'Uur', get: p => fmtDayTime(p.t) }, { label: 'km/u', num: true, get: p => fmtNum(p.wind_speed_10m, 0) }, { label: 'Stoten', num: true, get: p => fmtNum(p.wind_gusts_10m, 0) }, { label: 'Uit', get: p => `${compass(p.wind_direction_10m)} ${fmtDeg(p.wind_direction_10m)}` }]));
-  k1.el.appendChild(h('p', 'foot', `t/m ${fmtDayTime(H.horizon)} · Beaufort afgeleid van de uursnelheid${ensFoot(H)}`));
 }
 
 /* ---------------- Bewolking ---------------- */
@@ -1139,7 +1382,7 @@ function renderCloud(c) {
     `Nu · ${fmtTime(r0.t)}`, cloudWord(r0.cloud_cover), `${r0.cloud_cover}% bedekt · laag ${r0.cloud_cover_low}% · midden ${r0.cloud_cover_mid}% · hoog ${r0.cloud_cover_high}%`);
 
   c.appendChild(horizonBar());
-  const k1 = card(spanTitle(H.hours), [b('KNMI HARMONIE-AROME'), ' · 2 km · bedekkingsgraad']);
+  const k1 = card(spanTitle(), ['Verwachting per uur · deel van de hemel bedekt']);
   c.appendChild(k1.el);
   const pct = { min: 0, max: 100, step: 25 };
   drawChart(k1.body, { sky: skyOf(),
@@ -1156,12 +1399,12 @@ function renderCloud(c) {
   });
   legend(k1.el, [{ name: 'Totale bedekking', color: 'var(--cloud-hi)', note: 'donkerder = meer bewolking' }, { name: 'Lage bewolking (< 2 km)', color: 'var(--cloud-mid)', dashed: true }, ...ensLegend('var(--cloud-hi)')]);
   k1.tableHost.appendChild(dataTable(H.instant, [{ label: 'Uur', get: p => fmtDayTime(p.t) }, { label: 'Totaal', num: true, get: p => `${p.cloud_cover}%` }, { label: 'Laag', num: true, get: p => `${p.cloud_cover_low}%` }, { label: 'Midden', num: true, get: p => `${p.cloud_cover_mid}%` }, { label: 'Hoog', num: true, get: p => `${p.cloud_cover_high}%` }]));
-  k1.el.appendChild(h('p', 'foot', `t/m ${fmtDayTime(H.horizon)}${ensFoot(H)}`));
 }
 
 /* ======================================================================
    5. UI wiring: tabs, sheet, search, geolocation
    ====================================================================== */
+$('infoBtn').addEventListener('click', () => { state.tab = 'info'; $('screen').scrollTo({ top: 0, behavior: 'auto' }); render(); });
 for (const btn of document.querySelectorAll('.tab')) {
   btn.addEventListener('click', () => {
     if (state.tab === btn.dataset.tab) { $('screen').scrollTo({ top: 0 }); return; }
@@ -1229,12 +1472,14 @@ $('content').addEventListener('pointerdown', e => {
   const nowMs = Date.now();
   for (const [id, p] of pinch.pts) if (nowMs - p.at > 4000 || (pinch.host && pinch.host !== host)) pinch.pts.delete(id);
   pinch.host = host;
-  // capture on the host: the SVG inside may be redrawn mid-gesture, the host itself stays
-  try { host.setPointerCapture(e.pointerId); } catch (err) {}
   pinch.pts.set(e.pointerId, { x: e.clientX, y: e.clientY, at: nowMs });
   if (pinch.pts.size === 2) {
+    // only now take both pointers away from the chart (one finger = scrubbing, handled by the chart itself);
+    // capture on the host: the SVG inside is redrawn mid-gesture, the host itself stays
+    for (const id of pinch.pts.keys()) { try { host.setPointerCapture(id); } catch (err) {} }
     pinch.active = true; pinch.startDist = dist(); pinch.startHorizon = state.horizon == null ? maxHorizonHours() : state.horizon;
     hideTooltip();
+    for (const hh of document.querySelectorAll('.chart')) if (hh._scrubTo) hh._scrubTo(null);
   }
 });
 window.addEventListener('pointermove', e => {
@@ -1267,7 +1512,7 @@ $('content').addEventListener('wheel', e => {
 /* ======================================================================
    6. Self-tests (open with ?test=1)
    ====================================================================== */
-const api = { raintextToMmh, parseRaintext, deriveCloudTotal, beaufort, compass, cloudWord, niceScale, parseForecast, parseEnsemble, parseObs, haversineKm, monotonePath, quantile, tickStepHours, compareRain, drawChart, sunAltitude, solarEvents, skyColor, sunPhase, sunGlyph, sunWeatherKind, weatherAt, MODELS, state };
+const api = { raintextToMmh, parseRaintext, deriveCloudTotal, beaufort, compass, cloudWord, niceScale, parseForecast, parseEnsemble, parseObs, haversineKm, monotonePath, quantile, tickStepHours, compareRain, drawChart, tempColor, weatherIcon, hourIcons, treeView, setTree, BEAUFORT, spanFor, maxHorizonHours, sunAltitude, solarEvents, skyColor, sunPhase, sunGlyph, sunWeatherKind, weatherAt, MODELS, state };
 window.Regen = api;
 
 function runTests() {
@@ -1495,6 +1740,35 @@ function runTests() {
     ok(!ticks.includes('20:00'), '20:00 weggelaten (te dicht bij nu)'); ok(ticks.includes('20:30'), '20:30 blijft');
     host.remove();
   });
+  test('overzicht: temperatuurkleur loopt van blauw naar rood, icoontjes volgen weer en dag/nacht', () => {
+    ok(tempColor(-20).startsWith('rgb(79'), 'koud = blauw'); ok(tempColor(40).startsWith('rgb(227'), 'heet = rood');
+    const mid = tempColor(18); ok(mid === 'rgb(237,161,0)', 'stop 18° = amber, kreeg ' + mid);
+    const g = weatherIcon(0, 0, 'rain', false); ok(g.querySelector('.cloud') && g.querySelectorAll('.drops line').length === 3, 'regenicoon');
+    ok(weatherIcon(0, 0, 'clear', true).querySelector('.moon') && !weatherIcon(0, 0, 'clear', true).querySelector('.disc'), 'nacht = maan');
+    ok(weatherIcon(0, 0, 'partly', false).querySelector('.disc') && weatherIcon(0, 0, 'partly', false).querySelector('.cloud'), 'half bewolkt = zon + wolk');
+    const saved = state.forecast;
+    try {
+      state.forecast = parseForecast(mkJson(undefined, hh => { hh['precipitation_knmi_harmonie_arome_netherlands'][23] = 1.2; }), NOW);
+      const ic = hourIcons(state.forecast.models.harmonie);
+      eq(ic[2].kind, 'rain', 'uur 22–23 regen'); ok(ic[0].night, '20:30 in oktober is nacht'); eq(ic[0].kind, 'partly', '40% bewolking = half bewolkt');
+    } finally { state.forecast = saved; }
+  });
+  test('boom: Beaufort stuurt zwaai, scheefstand en richting; vanaf 5 Bft vliegen bladeren', () => {
+    const el = treeView();
+    setTree(el, 0, 90, 'x'); eq(el.dataset.bft, '0'); ok(el.classList.contains('still'), 'windstil');
+    setTree(el, 45, 270, 'x'); eq(el.dataset.bft, '6'); ok(el.classList.contains('flying'), 'bladeren vliegen'); ok(el.style.getPropertyValue('--lean').startsWith('9'), 'westenwind leunt naar rechts: ' + el.style.getPropertyValue('--lean'));
+    setTree(el, 45, 90, 'x'); ok(el.style.getPropertyValue('--lean').startsWith('-9'), 'oostenwind leunt naar links');
+    setTree(el, 120, 180, 'x'); eq(el.dataset.bft, '12'); ok(el.querySelector('.tree-desc').textContent.startsWith('Orkaan'), 'orkaan');
+    eq(BEAUFORT.length, 13);
+  });
+  test('48 uur: spanFor en maxHorizonHours gaan nooit verder dan 48 uur vooruit', () => {
+    const saved = { f: state.forecast, hz: state.horizon };
+    try {
+      state.forecast = parseForecast(mkJson({ harmonie: 90, icon: 60, arome: 60 }), NOW);
+      const H = state.forecast.models.harmonie;
+      near(maxHorizonHours(), 48, 1e-9); const s = spanFor([H]); eq((s.tMax - s.tMin) / HOUR, 48);
+    } finally { state.forecast = saved.f; state.horizon = saved.hz; }
+  });
   test('horizon: zoom houdt de start op nu en kapt het einde af; buiten bereik = alles', () => {
     const saved = { f: state.forecast, hz: state.horizon };
     try {
@@ -1502,7 +1776,7 @@ function runTests() {
       const H = state.forecast.models.harmonie;
       state.horizon = 24;
       let s = spanFor([H]);
-      eq(s.tMin.getTime(), state.forecast.startHour.getTime(), 'start = nu'); eq(s.tMax.getTime(), H.horizon.getTime(), 'spanFor geeft het volledige bereik');
+      eq(s.tMin.getTime(), state.forecast.startHour.getTime(), 'start = nu'); eq(s.tMax.getTime(), Math.min(H.horizon.getTime(), state.forecast.startHour.getTime() + 48 * HOUR), 'spanFor geeft het bereik tot 48 uur');
       // drawChart past de zoom toe: alleen staven binnen 24 uur worden getekend
       const host = h('div'); host.style.width = '360px'; document.body.appendChild(host);
       const pts = H.interval.map(p => ({ t: p.t, tEnd: p.tEnd, v: 1 }));
@@ -1510,11 +1784,11 @@ function runTests() {
       eq(host.querySelectorAll('.bar').length, 24, '24 staven bij 24 uur zoom');
       ok(host.querySelectorAll('.vgrid line').length >= 3, 'verticale stippellijnen');
       state.horizon = null; drawChart(host, { ...s, ticks: 'days', unit: 'mm', series: [{ kind: 'bar', name: 'x', color: 'red', points: pts }], fmt: fmtMm, tipTime: () => '', yOpts: { zero: true } });
-      eq(host.querySelectorAll('.bar').length, pts.length, 'alle staven zonder zoom');
+      eq(host.querySelectorAll('.bar').length, Math.min(pts.length, 48), 'alle staven binnen 48 uur zonder zoom');
       host.remove();
       state.horizon = 500; s = spanFor([H]);
-      eq(s.tMax.getTime(), H.horizon.getTime(), 'bereik blijft de modelhorizon');
-      near(maxHorizonHours(), 70 - 20 - 1, 1e-9, 'max horizon = uren tot laatste tijdstip');
+      eq(s.tMax.getTime(), Math.min(H.horizon.getTime(), state.forecast.startHour.getTime() + 48 * HOUR), 'bereik blijft begrensd op 48 uur');
+      near(maxHorizonHours(), 48, 1e-9, 'max horizon = 48 uur');
     } finally { state.forecast = saved.f; state.horizon = saved.hz; }
   });
 

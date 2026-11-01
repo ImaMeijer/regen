@@ -92,3 +92,11 @@ Knijpen tekent de grafieken in place opnieuw (de bezig-aanraking blijft op hetze
 - **Kans op regen** staat nu in dezelfde kaart als de HARMONIE-staven, als lage sub-grafiek (92 px) met dezelfde tijdas en zoom: een vloeiende lijn via monotone kubieke interpolatie (Fritsch–Carlson, geen overshoot), elk uurpunt in het midden van zijn uur.
 - **Nu-label.** Onder de gestippelde nu-lijn staat de huidige tijd vet; reguliere tijdlabels binnen 30 px ervan vervallen (op de 2-uurs grafiek ≈ 12 minuten, op 48 uur ≈ 2 uur). Het "nu"-label bovenin is weg.
 - **Bewolking in grijs.** De bedekkingslijn kleurt langs zijn lengte van lichtgrijs (0%) naar donkergrijs (100%) (in donker thema omgekeerd), met grijs vlak en grijze ensembleband. Bovendien trekt bewolking in álle grafieken de dagtint 70 % naar grijs, zodat een bewolkte dag grijs is en een heldere dag warm; de nacht blijft onveranderd.
+
+## Versie 7: overzicht, boom, info, scrub, 48 uur
+
+- **Overzicht-tab** (tweede tab): temperatuur per uur als staven, gekleurd van blauw (koud) via amber naar rood (warm), met boven elk uur een weericoontje (zon of maan, half bewolkt, bewolkt, regen) uit dezelfde regels als de zonnetjes; 's nachts een maan. Daaronder een lage neerslaggrafiek met dezelfde tijdas. Icoontjes worden uitgedund als er minder dan 18 px per uur is.
+- **Boom op de windpagina**, onder de pijlen: zwaai-amplitude, scheefstand en zwaaiperiode per Beaufort (KNMI-tabel "uitwerking op land"), leunend in de richting waarheen de wind waait; vanaf 5 Bft vliegen bladeren weg. Standaard de gemeten wind van nu; sleep over de grafiek en de boom toont het uur onder je vinger.
+- **Info-pagina** als verborgen tab (knop onderaan elke pagina), met alles over werking, bronnen, leesinstructie, de Beaufort-tabel en licenties. Modelnamen zijn uit de gewone schermen verdwenen: daar staat "verwacht", "gemeten", "kans op regen" en "onzekerheid".
+- **Schuiven met de vinger**: de stippellijn volgt je vinger, met de tijd eronder; botsende tijdlabels verdwijnen; gekoppelde grafieken in dezelfde kaart bewegen mee; na loslaten springt de lijn na 1,8 s terug naar nu. Oorzaak van de oude bug: de knijp-handler nam elke aanraking in beslag (pointer capture), ook met één vinger; nu pas bij de tweede vinger.
+- **Maximaal 48 uur** vooruit; presets 6 / 12 / 24 / 48 u; de tegel "Tot horizon" is weg.
