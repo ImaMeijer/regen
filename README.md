@@ -10,7 +10,7 @@ Smartphone-prototype van een buienapp op basis van fijnmazige weermodellen. Drie
 
 Open `index.html` via een lokale webserver (bijvoorbeeld `..\buienalarm\serve.ps1 -Root .. -Port 8765` en dan `http://localhost:8765/regenapp/`). Rechtstreeks openen als bestand werkt in Chrome ook, omdat beide API's externe aanroepen toestaan.
 
-Zelftests: `index.html?test=1` toont een paneel met 22 tests (parsen, vergelijkingslogica, schaalverdeling, grafiekmotor). Donker thema forceren: `?theme=dark`.
+Zelftests: `index.html?test=1` toont een paneel met alle zelftests (56 bij versie 13). Donker thema forceren: `?theme=dark`.
 
 ## Databronnen
 
@@ -127,3 +127,19 @@ De boom wordt nu van iets boven bekeken: een ronde kruin van zes uitwaaierende t
 ## Versie 12: icoontjes
 
 Het tab-icoontje van Overzicht gebruikt onderin hetzelfde wolkje als Bewolking, verkleind, zonder de uitstulping linksonder. De tegel bovenin het overzicht toont het weerbeeld van nu met dezelfde icoontjes als de uurrij (zon of maan, half bewolkt, bewolkt, regen).
+
+## Versie 13: eerlijkere kop, temperatuur uit ICON-D2, verouderde data zichtbaar
+
+Eerste ronde verbeteringen na de audit van 1 november 2026.
+
+- **Eerstvolgende neerslag:** eerst de radar, ook het slot waar je nu in zit ("Nu"). Na het radarvenster telt een modeluur alleen als nat bij minstens 0,2 mm (0,1 mm is spoortjes) én een ensemblekans van minstens 30 %; een uur dat de radar half dekt telt vanaf het einde van de radar. Anders "Droog" t/m 48 uur vooruit, met de hoogste kans in die periode. Voorheen pakte de kop het eerste uur met 0,1 mm, ook binnen het droge radarvenster en ook bij een kans van 0 %.
+- **Kansen** staan overal op dezelfde manier: in stappen van 5 % (twintig leden), met "< 5%" en "> 95%" in plaats van 0 % en 100 %.
+- **Temperatuur uit ICON-D2** (DWD, via Open-Meteo), op Temperatuur en Overzicht. In de eigen verificatie was HARMONIE +0,3 tot +0,6 °C te warm en significant slechter. De band komt uit het ICON-D2-ensemble en hoort nu bij hetzelfde model als de lijn; valt ICON-D2 weg, dan toont de app HARMONIE zonder band. Neerslag, wind en bewolking blijven HARMONIE.
+- **Verouderde data:** de service worker cachet alleen nog de app-schil. Elke databron wordt na een geslaagde aanroep met ophaaltijd in `localStorage` bewaard (`regen.data.*`); zonder verbinding toont de app die kopie met een melding "Geen verbinding. Je ziet de gegevens van …" en in de kop "offline · gegevens van …". Radarslots die voorbij zijn en stationsmetingen van meer dan een uur oud worden weggelaten. Bij terugkeer van de verbinding ververst de app meteen.
+- **Middernacht:** raintext-regels krijgen de dag die het dichtst bij het ophaalmoment ligt. Een reeks die om 23:55 begint terwijl het al 00:02 is, belandde eerst een dag later.
+- **Wisselen van plaats** tijdens het laden: een trager antwoord van de vorige plaats overschrijft de nieuwe niet meer.
+- **Radar in de uurgrafiek:** de uren die de radar dekt halen hun neerslag uit de radar (intensiteit × 5 min over het overlappende deel), het uur waarin de radar stopt vult de rest pro rata aan met het model, en van het lopende uur telt alleen wat nog komt. Dat geldt overal: staven, tabel, tegels 24 u / 48 u, weericoontjes, boompjes en de kop. Voor uren die de radar helemaal dekt staat er geen kans en begint de kanslijn pas na de radar. Zo kan de uurgrafiek nooit regen tonen waar de radar droog is.
+- **Wind bij de boom per Beaufort:** vaste tabellen in plaats van lineaire formules. Windveld: 0 Bft geen streken, vanaf 1 Bft 8 vage, trage streken (genoeg om de richting te lezen), vanaf 5 Bft alle 16, en daarna steeds langer, dikker (tot 3) en sneller. Blaadjes hebben een eigen uitslag en tempo, naar de KNMI-omschrijvingen: bijna stil bij 0–1 Bft (±1–2°), ritselen bij 2 Bft (±5°, snel), en daarna steeds wijder en sneller (±20° bij 5 Bft, ±32° bij 7 Bft, ±42° bij 9 Bft). Dezelfde tabellen sturen de kleine scènes in Overzicht.
+- **Verouderd-melding:** een bewaarde kopie van minder dan 10 minuten oud telt als actueel, zodat één haperende bron geen alarm geeft. Faalt alles, dan staat er "Geen verbinding"; faalt een deel, dan "Niet alles kon worden bijgewerkt".
+- **Dagstrook gelijkgetrokken:** op alle tabbladen staan de dagnamen op dezelfde hoogte (14 px) met direct daaronder één rij: de weericoontjes in Overzicht, de zonnetjes bij op- en ondergang op de andere tabbladen (32 px), en de grafiek begint op 46 px. In Overzicht scheelt dat 20 px lege ruimte; daar is de temperatuurgrafiek bovendien 240 px hoog in plaats van 210, waardoor het plotvlak groeit van 58 naar 108 px.
+- Zelftests: 56.

@@ -1,6 +1,7 @@
-/* Service worker: app-schil offline beschikbaar, data altijd eerst van het netwerk.
+/* Service worker: app-schil offline beschikbaar. Data (Open-Meteo, Buienradar) gaat er bewust buiten om:
+   de app bewaart zelf de laatste versie mét ophaaltijd en meldt het als die verouderd is.
    Bump CACHE bij elke release zodat oude schillen worden opgeruimd. */
-const CACHE = 'regen-v12';
+const CACHE = 'regen-v13';
 const SHELL = ['./', './index.html', './app.css', './app.js', './manifest.json', './icon.svg'];
 
 self.addEventListener('install', e => {
@@ -11,14 +12,12 @@ self.addEventListener('activate', e => {
 });
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
-  if (e.request.method !== 'GET') return;
-  // netwerk eerst; bij geen netwerk de laatste gecachte versie (ook voor API-antwoorden, zodat de laatste data zichtbaar blijft)
+  if (e.request.method !== 'GET' || url.origin !== self.location.origin) return;
+  // netwerk eerst; zonder netwerk de laatst gecachte schil
   e.respondWith(
     fetch(e.request).then(res => {
-      if (res.ok && (url.origin === self.location.origin || url.hostname.endsWith('open-meteo.com') || url.hostname.endsWith('buienradar.nl'))) {
-        const copy = res.clone(); caches.open(CACHE).then(c => c.put(e.request, copy));
-      }
+      if (res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)); }
       return res;
-    }).catch(() => caches.match(e.request, { ignoreSearch: url.origin === self.location.origin }))
+    }).catch(() => caches.match(e.request, { ignoreSearch: true }))
   );
 });

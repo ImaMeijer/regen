@@ -1,6 +1,6 @@
 /* Regen · prototype
-   Nowcast: Buienradar raintext (2 h, 5 min). Models via Open-Meteo:
-   KNMI HARMONIE-AROME NL (2 km), DWD ICON-D2 (2,2 km), Météo-France AROME HD (1,5 km). */
+   Nowcast: Buienradar raintext (2 h, 5 min). Models via Open-Meteo: KNMI HARMONIE-AROME NL (2 km) for rain,
+   wind and cloud; DWD ICON-D2 (2,2 km) for temperature; ICON-D2-EPS for chance and bands. */
 (() => {
 'use strict';
 
@@ -14,6 +14,9 @@ const MODELS = [
   { id: 'meteofrance_arome_france_hd',     key: 'arome',    name: 'AROME',    long: 'Météo-France AROME HD', org: 'Météo-France', res: '1,5 km', color: 'var(--s3)' },
 ];
 const PRIMARY = MODELS[0];
+// Temperature comes from ICON-D2: in the own verification HARMONIE was +0,3 to +0,6 °C too warm and its error
+// significantly larger at every lead time. ICON-D2 also matches the ICON-D2 ensemble that draws the band.
+const TEMP_MODEL = MODELS[1];
 const VARS = ['precipitation', 'rain', 'snowfall', 'temperature_2m', 'apparent_temperature',
   'wind_speed_10m', 'wind_direction_10m', 'wind_gusts_10m',
   'cloud_cover', 'cloud_cover_low', 'cloud_cover_mid', 'cloud_cover_high', 'weather_code'];
@@ -50,8 +53,10 @@ const h = (tag, cls, text) => {
 // Buienradar raintext value (0..255) → mm/h. 109 ≙ 1 mm/h, each +32 ≙ ×10.
 function raintextToMmh(v) { return v <= 0 ? 0 : Math.pow(10, (v - 109) / 32); }
 
-// Lines "VVV|HH:MM" in Dutch local time → [{t, v}] with v in mm/h.
-function parseRaintext(text, now = new Date()) {
+// Lines "VVV|HH:MM" in Dutch local time → [{t, v}] with v in mm/h. The feed carries no date: each line gets
+// the day that puts it closest to `anchor` (the moment the text was fetched), so a series that starts just
+// before midnight stays on the old day and one that runs past midnight moves to the next.
+function parseRaintext(text, anchor = new Date()) {
   const out = [];
   for (const raw of text.trim().split(/\r?\n/)) {
     const parts = raw.trim().split('|');
@@ -59,9 +64,11 @@ function parseRaintext(text, now = new Date()) {
     const val = parseInt(parts[0], 10);
     const hm = parts[1].split(':').map(Number);
     if (!Number.isFinite(val) || hm.length !== 2 || hm.some(x => !Number.isFinite(x))) continue;
-    const t = new Date(now);
+    const t = new Date(anchor);
     t.setHours(hm[0], hm[1], 0, 0);
-    if (t.getTime() < now.getTime() - 3 * HOUR) t.setDate(t.getDate() + 1); // series crosses midnight
+    const d = t.getTime() - anchor.getTime();
+    if (d > 12 * HOUR) t.setDate(t.getDate() - 1);
+    else if (d < -12 * HOUR) t.setDate(t.getDate() + 1);
     out.push({ t, v: Math.round(raintextToMmh(val) * 100) / 100, raw: val });
   }
   return out;
@@ -394,10 +401,11 @@ function drawChart(host, spec) {
   const hasDays = spec.ticks === 'days';
   const compact = !!spec.compact; // sub-chart under a main chart: same x-axis, no day strip, no x labels
   const arrowRow = spec.arrows ? 22 : 0;
-  const iconRow = spec.icons && !compact ? 24 : 0; // row of weather icons between the day strip and the plot
   const treeRow = spec.trees && !compact ? 62 : 0; // row of little wind scenes under the x labels
-  const m = { top: (compact ? 10 : (hasDays ? 42 : 26)) + iconRow, right: 10, bottom: compact ? 8 : 24 + arrowRow + treeRow, left: 34 };
-  const strip = m.top - iconRow; // where the day strip sits (above the icon row)
+  // day strip, the same on every tab: day labels on top, right below them one row with either the hourly weather
+  // icons (overview) or the sunrise/sunset glyphs (other tabs), then the plot
+  const m = { top: compact ? 10 : hasDays ? 46 : 26, right: 10, bottom: compact ? 8 : 24 + arrowRow + treeRow, left: 34 };
+  const dayLabelY = 14, daySepTop = 2, glyphY = hasDays ? m.top - 14 : m.top - 9;
   const pw = W - m.left - m.right, ph = H - m.top - m.bottom;
   const t0 = spec.tMin.getTime();
   // multi-day charts honour the zoom horizon: the start stays at "nu", only the end moves
@@ -471,7 +479,7 @@ function drawChart(host, spec) {
       const dt = new Date(t);
       const midnight = dt.getHours() === 0 && t > t0;
       if (midnight) {
-        svg.appendChild(svgEl('line', { class: 'day-sep', x1: x(t), x2: x(t), y1: strip - 22, y2: m.top + ph }));
+        svg.appendChild(svgEl('line', { class: 'day-sep', x1: x(t), x2: x(t), y1: daySepTop, y2: m.top + ph }));
         days.push([segStart, t]); segStart = t;
       }
       if (dt.getHours() % every === 0 && t >= t0) {
@@ -482,7 +490,7 @@ function drawChart(host, spec) {
     days.push([segStart, t1]);
     if (!compact) for (const [a, b] of days) {
       const wseg = x(b) - x(a); if (wseg < 22) continue;
-      svg.appendChild(svgEl('text', { x: (x(a) + x(b)) / 2, y: strip - 26, 'text-anchor': 'middle', class: 'day-label' }, wseg < 64 ? fmtWd(new Date(a)) : fmtDay(new Date(a))));
+      svg.appendChild(svgEl('text', { x: (x(a) + x(b)) / 2, y: dayLabelY, 'text-anchor': 'middle', class: 'day-label' }, wseg < 64 ? fmtWd(new Date(a)) : fmtDay(new Date(a))));
     }
   } else {
     for (let t = Math.ceil(t0 / (30 * 60e3)) * 30 * 60e3; t <= t1; t += 30 * 60e3) {
@@ -515,7 +523,7 @@ function drawChart(host, spec) {
     if (px < m.left || px > W - m.right) continue;
     const wx = spec.sky.weatherAt ? spec.sky.weatherAt(ev.t) : null;
     const kind = sunWeatherKind(wx);
-    svg.appendChild(sunGlyph(px, strip - 9, ev.kind, kind, `${ev.kind === 'sunrise' ? 'Zon op' : 'Zon onder'} ${fmtTime(ev.t)} · ${SUN_WORDS[kind]}`));
+    svg.appendChild(sunGlyph(px, glyphY, ev.kind, kind, `${ev.kind === 'sunrise' ? 'Zon op' : 'Zon onder'} ${fmtTime(ev.t)} · ${SUN_WORDS[kind]}`));
   }
 
   // hourly weather icons (overview): one per hour where there is room, else every 2nd/3rd hour
@@ -526,7 +534,7 @@ function drawChart(host, spec) {
       if (i % iconStep) return;
       const px = x(ic.t.getTime());
       if (px < m.left - 2 || px > W - m.right + 2) return;
-      svg.appendChild(weatherIcon(px, m.top - 12, ic.kind, ic.night));
+      svg.appendChild(weatherIcon(px, glyphY, ic.kind, ic.night));
     });
   }
   // little scenes under the x labels: the same tree + wind field + rain as on the wind page, on icon hours,
@@ -814,7 +822,7 @@ const b = txt => { const n = h('b', null, txt); return n; };
 const DEFAULT_LOC = { name: 'Amsterdam', admin: 'Noord-Holland', lat: 52.37, lon: 4.90 };
 const HORIZON_MIN = 6; // uren
 /* horizon: hoeveel uur vooruit de 2,5-daagse grafieken tonen, altijd vanaf nu; null = alles tot de modelhorizon */
-const state = { loc: DEFAULT_LOC, tab: 'rain', nowcast: null, forecast: null, updated: null, rainModel: 'harmonie', errors: {}, horizon: null };
+const state = { loc: DEFAULT_LOC, tab: 'rain', nowcast: null, forecast: null, updated: null, rainModel: 'harmonie', errors: {}, horizon: null, fetched: {} };
 try {
   const l = JSON.parse(localStorage.getItem('regen.loc') || 'null');
   if (l && Number.isFinite(l.lat) && Number.isFinite(l.lon)) state.loc = l;
@@ -824,7 +832,7 @@ try {
 
 const nowcastUrl = (lat, lon) => `https://gpsgadget.buienradar.nl/data/raintext?lat=${lat.toFixed(2)}&lon=${lon.toFixed(2)}`;
 const forecastUrl = (lat, lon) => `https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(4)}&longitude=${lon.toFixed(4)}` +
-  `&hourly=${VARS.join(',')}&models=${PRIMARY.id}&forecast_days=4&timezone=Europe%2FAmsterdam`;
+  `&hourly=${VARS.join(',')}&models=${PRIMARY.id},${TEMP_MODEL.id}&forecast_days=4&timezone=Europe%2FAmsterdam`;
 /* ICON-D2-EPS: 20 leden, 2,2 km, ±48 u. Alleen voor kans en spreiding; HARMONIE blijft de verwachting. */
 const ENS = { id: 'icon_d2_eps', name: 'ICON-D2-ensemble', long: 'DWD ICON-D2-EPS', members: 20, res: '2,2 km' };
 const ENS_VARS = ['precipitation', 'temperature_2m', 'wind_speed_10m', 'cloud_cover'];
@@ -875,6 +883,36 @@ function probAt(t) {
   const row = e.prob.find(p => ms >= p.t.getTime() && ms < p.tEnd.getTime());
   return row ? row.v : null;
 }
+/* A chance as it should be read: 20 members give steps of 5 %, and 0 of 20 members is not "zero". */
+function fmtProb(p) {
+  if (p == null) return '–';
+  if (p < 0.05) return '< 5%';
+  if (p > 0.95) return '> 95%';
+  return `${Math.round(p * 20) * 5}%`;
+}
+/* What the hero tile says. Radar first, including the slot we are in. After the radar window: the first model
+   hour with real rain (≥ 0,2 mm; 0,1 mm is a trace) that the ensemble also gives ≥ 30 % — an hour the
+   radar half covers counts from where the radar stops. Otherwise dry up to 48 h, with the highest chance. */
+const RAIN_MM = 0.2, RAIN_PROB = 0.3;
+function nextRain(nowcast, H, ens, now = new Date()) {
+  const slot = nowcast && nowcast.find(p => p.v >= 0.1 && p.t.getTime() + MIN5 > now.getTime());
+  if (slot) return { kind: 'radar', t: slot.t, now: slot.t <= now, mmh: slot.v };
+  const radarEnd = nowcast && nowcast.length ? nowcast[nowcast.length - 1].t.getTime() + MIN5 : null;
+  if (!H || !H.applicable || !H.interval.length) return radarEnd ? { kind: 'dry', until: new Date(radarEnd), maxP: null } : null;
+  const from = radarEnd || now.getTime();
+  const end = Math.min(H.instant[0].t.getTime() + HORIZON_MAX * HOUR, H.interval[H.interval.length - 1].tEnd.getTime());
+  const probOf = p => { const r = ens && ens.prob.find(q => q.t.getTime() === p.t.getTime()); return r ? r.v : null; };
+  let maxP = null, maxT = null;
+  for (const p of H.interval) {
+    if (p.tEnd.getTime() <= from || p.t.getTime() >= end) continue;
+    const pr = probOf(p);
+    if (pr != null && (maxP == null || pr > maxP)) { maxP = pr; maxT = p.t; }
+    if (p.precipitation >= RAIN_MM && (pr == null || pr >= RAIN_PROB)) {
+      return { kind: 'model', t: new Date(Math.max(p.t.getTime(), radarEnd || 0)), mm: p.precipitation, prob: pr };
+    }
+  }
+  return { kind: 'dry', until: new Date(end), maxP, maxT };
+}
 const geoUrl = q => `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=8&language=nl&format=json`;
 
 async function fetchOk(url, asText) {
@@ -883,24 +921,104 @@ async function fetchOk(url, asText) {
   return asText ? r.text() : r.json();
 }
 
+/* ---- last good answer per source, with the moment it was fetched ----
+   The service worker no longer caches data: without network the app falls back on these copies and says
+   how old they are, instead of showing old data under a fresh "bijgewerkt". */
+const STORE_PREFIX = 'regen.data.';
+const MAX_AGE = { nowcast: 2 * HOUR, forecast: 24 * HOUR, ens: 24 * HOUR, obs: 2 * HOUR }; // oudste bewaarde kopie die nog getoond wordt
+const OBS_MAX_AGE = HOUR; // een meting van meer dan een uur geleden is geen "nu" meer
+const sameLoc = (a, b) => !b || (a && Math.abs(a.lat - b.lat) < 1e-4 && Math.abs(a.lon - b.lon) < 1e-4);
+function storeSave(key, loc, body, at) {
+  try { localStorage.setItem(STORE_PREFIX + key, JSON.stringify({ lat: loc ? loc.lat : null, lon: loc ? loc.lon : null, at: at.getTime(), body })); } catch (e) {}
+}
+function storeLoad(key, loc, now = new Date()) {
+  try {
+    const s = JSON.parse(localStorage.getItem(STORE_PREFIX + key) || 'null');
+    if (s && typeof s.body === 'string' && Number.isFinite(s.at) && now.getTime() - s.at <= MAX_AGE[key] && sameLoc(s, loc)) return { body: s.body, at: new Date(s.at) };
+  } catch (e) {}
+  return null;
+}
+/* Network first. A good answer is parsed, then stored; on any failure the stored copy for this place is
+   parsed instead (parse gets the moment the text was fetched). loc null = not tied to a place. */
+async function loadSource(key, url, loc, now, parse) {
+  let err;
+  try {
+    const body = await fetchOk(url, true);
+    const value = parse(body, now);
+    storeSave(key, loc, body, now);
+    return { value, at: now, stored: false };
+  } catch (e) { err = e; }
+  const s = storeLoad(key, loc, now);
+  if (!s) throw err;
+  return { value: parse(s.body, s.at), at: s.at, stored: true };
+}
+/* The hours the radar covers take their rain from the radar, so the hourly bars can never disagree with the
+   2-hour chart: per model hour the radar's own amount over the overlap (intensity × 5 min), plus the model's
+   amount pro rata for the part after the radar window. The part of the current hour that has passed is left
+   out. src: 'radar' = fully covered, 'mix' = radar and model; model = the model's own value. */
+function blendRain(interval, nowcast) {
+  if (!nowcast || !nowcast.length) return interval;
+  const r0 = nowcast[0].t.getTime(), r1 = nowcast[nowcast.length - 1].t.getTime() + MIN5;
+  return interval.map(p => {
+    const a = p.t.getTime(), b = p.tEnd.getTime();
+    if (b <= r0 || a >= r1) return p;
+    let mm = 0;
+    for (const s of nowcast) { const st = s.t.getTime(); if (st >= a && st < b) mm += s.v / 12; }
+    const after = Math.max(0, b - Math.max(a, r1));
+    mm += (p.precipitation || 0) * after / HOUR;
+    mm = Math.round(mm * 100) / 100;
+    // below 0,05 mm a bar would be a hairline that reads as rain while the label says 0,0: show it as dry
+    return { ...p, precipitation: mm < 0.05 ? 0 : mm, src: after > 0 ? 'mix' : 'radar', model: p.precipitation };
+  });
+}
+/* chance of rain for an hour bar; none for an hour the radar fully covers (the radar has no chance) */
+const probFor = p => (p.src === 'radar' ? null : probAt(p.t));
+
+/* Drop what is no longer current: radar slots that have ended, a station reading older than an hour. */
+function freshOnly(nowcast, obs, now) {
+  const nc = nowcast ? nowcast.filter(p => p.t.getTime() + MIN5 > now.getTime()) : null;
+  return { nowcast: nc && nc.length ? nc : null, obs: obs && now - obs.time <= OBS_MAX_AGE ? obs : null };
+}
+/* Sources shown from a stored copy older than STALE_AFTER (a copy of a minute old is as good as fresh, so one
+   hiccup of one source raises no alarm). null when everything is current; else { since, all }: the oldest
+   fetch moment, and whether every source failed (no connection) or only some. */
+const STALE_AFTER = 10 * 60e3;
+function staleSince(now = new Date()) {
+  const f = Object.values(state.fetched || {});
+  const old = f.filter(x => x.stored && now - x.at > STALE_AFTER);
+  if (!old.length) return null;
+  return { since: new Date(Math.min(...old.map(x => x.at.getTime()))), all: f.every(x => x.stored) };
+}
+const sameDay = (a, b) => a.toDateString() === b.toDateString();
+const fmtWhen = d => (sameDay(d, new Date()) ? fmtTime(d) : fmtDayTime(d));
+
 let refreshTimer = null;
 async function load() {
-  const { lat, lon } = state.loc;
-  $('locName').textContent = state.loc.name;
+  const loc = state.loc, { lat, lon } = loc;
+  $('locName').textContent = loc.name;
   document.body.classList.add('loading');
   const now = new Date();
   const [nc, fc, en, ob] = await Promise.allSettled([
-    fetchOk(nowcastUrl(lat, lon), true).then(t => parseRaintext(t, now)),
-    fetchOk(forecastUrl(lat, lon)).then(j => parseForecast(j, now)),
-    fetchOk(ensembleUrl(lat, lon)).then(j => parseEnsemble(j, now)),
-    fetchOk(obsUrl).then(j => parseObs(j, lat, lon)),
+    loadSource('nowcast', nowcastUrl(lat, lon), loc, now, (b, at) => parseRaintext(b, at)),
+    loadSource('forecast', forecastUrl(lat, lon), loc, now, b => parseForecast(JSON.parse(b), now)),
+    loadSource('ens', ensembleUrl(lat, lon), loc, now, b => parseEnsemble(JSON.parse(b), now)),
+    loadSource('obs', obsUrl, null, now, b => parseObs(JSON.parse(b), lat, lon)),
   ]);
-  state.errors = {};
-  if (nc.status === 'fulfilled') state.nowcast = nc.value; else { state.nowcast = null; state.errors.nowcast = nc.reason.message; }
-  if (fc.status === 'fulfilled') state.forecast = fc.value; else { state.forecast = null; state.errors.forecast = fc.reason.message; }
-  if (en.status === 'fulfilled') state.ens = en.value; else { state.ens = null; state.errors.ens = en.reason.message; }
-  if (ob.status === 'fulfilled') state.obs = ob.value; else { state.obs = null; state.errors.obs = ob.reason.message; }
-  state.updated = new Date();
+  if (state.loc !== loc) return; // another place was chosen while this was loading
+  state.errors = {}; state.fetched = {};
+  const take = (key, r) => {
+    if (r.status === 'fulfilled') { state.fetched[key] = { at: r.value.at, stored: r.value.stored }; return r.value.value; }
+    state.errors[key] = r.reason.message; return null;
+  };
+  state.forecast = take('forecast', fc);
+  state.ens = take('ens', en);
+  const fresh = freshOnly(take('nowcast', nc), take('obs', ob), now);
+  if (!fresh.nowcast && !state.errors.nowcast) { state.errors.nowcast = 'verouderd'; delete state.fetched.nowcast; }
+  if (!fresh.obs && state.fetched.obs) delete state.fetched.obs;
+  state.nowcast = fresh.nowcast; state.obs = fresh.obs;
+  const H = state.forecast && state.forecast.models.harmonie;
+  if (H) H.interval = blendRain(H.interval, state.nowcast); // every view (bars, icons, trees, totals) sees the radar hours
+  state.updated = now;
   document.body.classList.remove('loading');
   render();
   clearTimeout(refreshTimer);
@@ -915,7 +1033,9 @@ const TABS = { rain: 'Regen', overview: 'Overzicht', temp: 'Temperatuur', wind: 
 function render() {
   hideTooltip();
   $('title').textContent = TABS[state.tab];
-  $('subtitle').textContent = state.tab === 'info' ? 'Over deze app en haar bronnen' : state.updated ? `${state.loc.name}${state.loc.admin ? ', ' + state.loc.admin : ''} · bijgewerkt ${fmtTime(state.updated)}` : state.loc.name;
+  const stale = staleSince();
+  const when = stale ? `${stale.all ? 'offline' : 'deels verouderd'} · gegevens van ${fmtWhen(stale.since)}` : state.updated ? `bijgewerkt ${fmtTime(state.updated)}` : '';
+  $('subtitle').textContent = state.tab === 'info' ? 'Over deze app en haar bronnen' : state.updated ? `${state.loc.name}${state.loc.admin ? ', ' + state.loc.admin : ''} · ${when}` : state.loc.name;
   const infoBtn = $('infoBtn'); if (infoBtn) infoBtn.hidden = state.tab === 'info';
   $('sunline').hidden = state.tab === 'info';
   document.title = `${TABS[state.tab]} · ${state.loc.name}`;
@@ -931,11 +1051,22 @@ function render() {
       if (!state.updated) { for (let i = 0; i < 2; i++) { const k = h('section', 'card'); k.appendChild(h('div', 'skeleton')); c.appendChild(k); } return; }
       const e = h('p', 'empty', 'Geen data beschikbaar. ' + Object.values(state.errors).join(' · ')); c.appendChild(e); return;
     }
+    if (stale && state.tab !== 'info') c.appendChild(staleNote(stale));
     ({ rain: renderRain, overview: renderOverview, temp: renderTemp, wind: renderWind, cloud: renderCloud, info: renderInfo })[state.tab](c);
   } finally {
     c.style.minHeight = '';
     if (screen.scrollTop !== keepScroll) screen.scrollTop = keepScroll;
   }
+}
+
+function staleNote({ since, all }) {
+  const n = h('div', 'warn stale');
+  n.setAttribute('role', 'status');
+  n.innerHTML = '<svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M10 5.8V10l2.8 1.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  n.appendChild(h('span', null, all
+    ? `Geen verbinding. Je ziet de gegevens van ${fmtWhen(since)}; die worden ververst zodra er weer verbinding is.`
+    : `Niet alles kon worden bijgewerkt. Een deel van wat je ziet is van ${fmtWhen(since)}.`));
+  return n;
 }
 
 /* Weather at an instant, from HARMONIE: cloud cover of the nearest hour and precipitation of the hour containing t. */
@@ -1072,16 +1203,17 @@ function renderRain(c) {
   const ht = h('div');
   ht.appendChild(h('div', 'l', 'Eerstvolgende neerslag'));
   const big = h('div', 'big'); const hint = h('div', 'h');
-  const nextNc = nc && nc.find(p => p.v >= 0.1 && p.t >= now);
-  const nextH = H && H.applicable && H.interval.find(p => p.precipitation >= 0.1);
-  if (nextNc) { big.textContent = `om ${fmtTime(nextNc.t)}`; hint.textContent = `${fmtMm(nextNc.v)} mm/u · radar`; }
-  else if (nextH) {
-    const pr = probAt(nextH.t);
-    big.textContent = fmtDayTime(nextH.t);
-    hint.textContent = `${fmtMm(nextH.precipitation)} mm in dat uur${pr != null ? ` · kans ${Math.round(pr * 10) * 10}%` : ''}`;
+  const nr = nextRain(nc, H, state.ens, now);
+  if (!nr) big.textContent = '–';
+  else if (nr.kind === 'radar') { big.textContent = nr.now ? 'Nu' : `om ${fmtTime(nr.t)}`; hint.textContent = `${fmtMm(nr.mmh)} mm/u · radar`; }
+  else if (nr.kind === 'model') {
+    big.textContent = fmtDayTime(nr.t);
+    hint.textContent = `${fmtMm(nr.mm)} mm in dat uur${nr.prob != null ? ` · kans ${fmtProb(nr.prob)}` : ''}`;
+  } else {
+    big.textContent = 'Droog';
+    const chance = nr.maxP == null ? '' : nr.maxP < 0.05 ? ' · kans < 5%' : ` · hoogste kans ${fmtProb(nr.maxP)} ${fmtDayTime(nr.maxT)}`;
+    hint.textContent = `geen regen verwacht t/m ${fmtDayTime(nr.until)}${chance}`;
   }
-  else if (H && H.applicable) { big.textContent = 'Droog'; hint.textContent = `geen neerslag verwacht t/m ${fmtDayTime(H.horizon)}`; }
-  else { big.textContent = '–'; }
   ht.appendChild(big); ht.appendChild(hint); hero.appendChild(ht);
   c.appendChild(hero);
 
@@ -1108,25 +1240,28 @@ function renderRain(c) {
   if (!H || !H.applicable) { errorNote(k2.body, 'forecast', 'Modelverwachting'); if (!state.errors.forecast) k2.body.appendChild(h('p', 'empty', 'Geen verwachting voor deze locatie.')); return; }
   k2.el.querySelector('h2').textContent = spanTitle();
 
-  const modelPts = m => m.interval.map(p => ({ t: p.t, tEnd: p.tEnd, v: p.precipitation, rain: p.rain, snow: p.snowfall }));
+  const modelPts = m => m.interval.map(p => ({ t: p.t, tEnd: p.tEnd, v: p.precipitation, rain: p.rain, snow: p.snowfall, src: p.src }));
+  const SRC_NOTE = { radar: ' · radar', mix: ' · radar en verwachting' };
   drawChart(k2.body, { sky: skyOf(),
     ...spanFor([H]), unit: 'mm/u', unitTip: 'mm', ticks: 'days', now, yOpts: { zero: true, minSpan: 1, headroom: 1.15 },
     series: [{ kind: 'bar', name: 'Neerslag', color: 'var(--s1)', points: modelPts(H) }], fmt: fmtMm, directLabels: 'peak', group: 'rain',
     tipTime: p => `${fmtWd(p.t)} ${fmtHourRange(p.t)}`,
-    tipNote: (s, p) => { const pr = probAt(p.t); return (pr != null ? ` · kans ${Math.round(pr * 100)}%` : '') + (p.snow > 0 ? ` · sneeuw ${fmtNum(p.snow, 1)} cm` : ''); },
+    tipNote: (s, p) => { const pr = probFor(p); return (SRC_NOTE[p.src] || '') + (pr != null ? ` · kans ${fmtProb(pr)}` : '') + (p.snow > 0 ? ` · sneeuw ${fmtNum(p.snow, 1)} cm` : ''); },
     aria: 'Neerslag per uur volgens HARMONIE',
   });
-  k2.tableHost.appendChild(dataTable(modelPts(H), [{ label: 'Uur', get: p => `${fmtWd(p.t)} ${fmtTime(p.t)}` }, { label: 'mm', num: true, get: p => fmtNum(p.v, 1) }, { label: 'Kans', num: true, get: p => { const pr = probAt(p.t); return pr == null ? '–' : `${Math.round(pr * 100)}%`; } }]));
+  k2.tableHost.appendChild(dataTable(modelPts(H), [{ label: 'Uur', get: p => `${fmtWd(p.t)} ${fmtTime(p.t)}` }, { label: 'mm', num: true, get: p => fmtNum(p.v, 1) }, { label: 'Kans', num: true, get: p => fmtProb(probFor(p)) }]));
   // probability of rain from the ensemble: a smooth line in the same card, same x-axis, under the bars
   const e = state.ens;
   if (e && e.prob.length) {
     const sub = h('div', 'chart sub');
     k2.body.after(sub);
     // each probability covers an hour; plot it at the middle of that hour so the curve sits over its bar
-    const pts = e.prob.map(p => ({ t: new Date(p.t.getTime() + HOUR / 2), tEnd: p.tEnd, v: Math.round(p.v * 100), row: p }));
+    // hours the radar fully covers have no chance: the line starts where the radar stops
+    const radarHour = p => H.interval.some(q => q.src === 'radar' && q.t.getTime() === p.t.getTime());
+    const pts = e.prob.filter(p => !radarHour(p)).map(p => ({ t: new Date(p.t.getTime() + HOUR / 2), tEnd: p.tEnd, v: Math.round(p.v * 100), row: p }));
     drawChart(sub, { sky: skyOf(), compact: true, group: 'rain',
-      ...spanFor([H]), unit: '%', unitTip: '%', ticks: 'days', now, yFixed: { min: 0, max: 100, step: 50 }, height: 92,
-      series: [{ kind: 'line', name: 'Kans op regen', color: 'var(--s1)', points: pts, smooth: true, area: true, areaOpacity: 0.14 }], fmt: v => fmtNum(v, 0),
+      ...spanFor([H]), unit: '%', ticks: 'days', now, yFixed: { min: 0, max: 100, step: 50 }, height: 92,
+      series: [{ kind: 'line', name: 'Kans op regen', color: 'var(--s1)', points: pts, smooth: true, area: true, areaOpacity: 0.14 }], fmt: v => fmtProb(v / 100),
       tipTime: p => `${fmtWd(p.row.t)} ${fmtHourRange(p.row.t)}`,
       tipNote: (s, p) => { const hr = H.interval.find(q => q.t.getTime() === p.row.t.getTime()); return hr ? ` · verwacht ${fmtMm(hr.precipitation)} mm` : ''; },
       aria: 'Kans op regen per uur volgens het ICON-D2-ensemble',
@@ -1196,6 +1331,19 @@ function needHarmonie(c) {
   if (!state.errors.forecast) c.appendChild(h('p', 'empty', 'Geen verwachting voor deze locatie.'));
   return null;
 }
+/* Model for temperature: ICON-D2, or HARMONIE when ICON-D2 has nothing for this place. */
+function tempModel() {
+  const f = state.forecast; if (!f) return null;
+  const T = f.models[TEMP_MODEL.key];
+  return T && T.applicable ? T : f.models.harmonie;
+}
+const rowAt = (m, t) => m.instant.find(r => r.t.getTime() === t.getTime());
+/* min and max over the hours of today that are still ahead */
+function todayRange(m) {
+  const day = m.instant[0].t.getDate();
+  const vs = m.instant.filter(p => p.t.getDate() === day && p.temperature_2m != null).map(p => p.temperature_2m);
+  return { mn: Math.min(...vs), mx: Math.max(...vs) };
+}
 
 /* ---------------- Overzicht: temperatuur per uur met weericoontjes ---------------- */
 function hourIcons(H) {
@@ -1209,12 +1357,12 @@ function hourIcons(H) {
 function renderOverview(c) {
   const H = needHarmonie(c); if (!H) return;
   const now = new Date();
-  const o = state.obs, r0 = H.instant[0];
+  const T = tempModel();
+  const o = state.obs, r0 = T.instant[0];
   const kind0 = sunWeatherKind(weatherAt(now));
   const night0 = sunAltitude(now, state.loc.lat, state.loc.lon) < SUN_RISESET;
   const word0 = kind0 === 'clear' && night0 ? 'helder' : ICON_WORDS[kind0];
-  const today = H.instant.filter(p => p.t.getDate() === r0.t.getDate());
-  const mx = Math.max(...today.map(p => p.temperature_2m)), mn = Math.min(...today.map(p => p.temperature_2m));
+  const { mn, mx } = todayRange(T);
   const temp = o && o.temp != null ? o.temp : r0.temperature_2m;
   heroBlock(c, '',
     o && o.temp != null ? `Gemeten ${fmtTime(o.time)} · ${o.station}` : `Nu · ${fmtTime(r0.t)} · verwacht`,
@@ -1229,11 +1377,11 @@ function renderOverview(c) {
   const k = card(spanTitle(), []);
   c.appendChild(k.el);
   const icons = hourIcons(H);
-  const pts = H.instant.map(r => ({ t: r.t, tEnd: new Date(r.t.getTime() + HOUR), v: r.temperature_2m, row: r }));
+  const pts = T.instant.map(r => ({ t: r.t, tEnd: new Date(r.t.getTime() + HOUR), v: r.temperature_2m, row: r }));
   const iconFor = p => icons.find(i => i.hour.getTime() === p.t.getTime());
   const trees = H.instant.map(r => { const iv = H.interval.find(p => p.t.getTime() === r.t.getTime()); return { t: new Date(r.t.getTime() + HOUR / 2), kmh: r.wind_speed_10m, dir: r.wind_direction_10m, rain: iv ? iv.precipitation : null }; });
   drawChart(k.body, { sky: skyOf(), group: 'overview',
-    ...spanFor([H]), unit: '°C', unitTip: '°C', ticks: 'days', now, yOpts: { minSpan: 8, targetTicks: 4 }, icons, trees,
+    ...spanFor([H]), unit: '°C', unitTip: '°C', ticks: 'days', now, yOpts: { minSpan: 8, targetTicks: 4 }, icons, trees, height: 240,
     series: [{ kind: 'line', name: 'Temperatuur', color: 'var(--s2)', colorAt: tempColor, points: pts.map(p => ({ t: p.t, v: p.v, row: p.row })), smooth: 'soft', area: true, areaOpacity: 0.16 }],
     fmt: v => fmtNum(v, 0), directLabels: 'minmax', tipTime: p => fmtDayTime(p.t),
     tipNote: (s, p) => { const ic = iconFor(p); const iv = H.interval.find(q => q.t.getTime() === p.t.getTime()); return (ic ? ` · ${ic.kind === 'clear' && ic.night ? 'helder' : ICON_WORDS[ic.kind]}` : '') + (iv && iv.precipitation >= 0.1 ? ` · ${fmtMm(iv.precipitation)} mm` : ''); },
@@ -1247,7 +1395,7 @@ function renderOverview(c) {
     series: [{ kind: 'bar', name: 'Neerslag', color: 'var(--s1)', points: rain }], fmt: fmtMm, tipTime: p => `${fmtWd(p.t)} ${fmtHourRange(p.t)}`,
     aria: 'Neerslag per uur',
   });
-  k.tableHost.appendChild(dataTable(H.instant, [{ label: 'Uur', get: p => fmtDayTime(p.t) }, { label: '°C', num: true, get: p => fmtNum(p.temperature_2m, 0) }, { label: 'Weer', get: p => { const ic = icons.find(i => i.hour.getTime() === p.t.getTime()); return ic ? (ic.kind === 'clear' && ic.night ? 'helder' : ICON_WORDS[ic.kind]) : ''; } }, { label: 'mm', num: true, get: p => { const iv = H.interval.find(q => q.t.getTime() === p.t.getTime()); return iv ? fmtNum(iv.precipitation, 1) : '–'; } }]));
+  k.tableHost.appendChild(dataTable(H.instant, [{ label: 'Uur', get: p => fmtDayTime(p.t) }, { label: '°C', num: true, get: p => { const r = rowAt(T, p.t); return r && r.temperature_2m != null ? fmtNum(r.temperature_2m, 0) : '–'; } }, { label: 'Weer', get: p => { const ic = icons.find(i => i.hour.getTime() === p.t.getTime()); return ic ? (ic.kind === 'clear' && ic.night ? 'helder' : ICON_WORDS[ic.kind]) : ''; } }, { label: 'mm', num: true, get: p => { const iv = H.interval.find(q => q.t.getTime() === p.t.getTime()); return iv ? fmtNum(iv.precipitation, 1) : '–'; } }]));
 }
 
 /* ---------------- Boom: wat de wind met een boom doet (KNMI-schaal van Beaufort) ---------------- */
@@ -1270,6 +1418,10 @@ const TREE = {
   amp:    [0, 0.4, 1, 2, 3.5, 5, 7, 9, 12, 15, 18, 22, 26],   // zwaai-amplitude in graden
   lean:   [0, 0, 1, 2, 4, 6, 9, 12, 16, 20, 25, 30, 35],       // scheefstand in graden
   period: [4, 3.6, 3.2, 2.8, 2.4, 2, 1.7, 1.4, 1.2, 1, 0.9, 0.8, 0.7], // zwaaiperiode in seconden
+  // the leaves carry most of the message (KNMI: 2 Bft leaves rustle, 3 Bft leaves and twigs move constantly,
+  // 5 Bft trees in leaf sway): almost still at 0–1 Bft, a small fast rustle at 2, then ever wider and faster
+  leafAmp:    [1, 2, 5, 9, 14, 20, 26, 32, 38, 42, 45, 48, 50],                                   // fladderen, ± graden
+  leafPeriod: [1.6, 1.0, 0.6, 0.45, 0.36, 0.3, 0.26, 0.23, 0.2, 0.18, 0.17, 0.16, 0.15],         // halve slag in seconden
 };
 /* One tree model (viewBox 0 0 100 110, foot at 50,106): curved trunk, five branches, lance-shaped leaves in two
    greens. Used large on the wind page and small in the overview row. Wind is applied with CSS variables. */
@@ -1351,6 +1503,8 @@ function windTree(g, kmh, dirDeg, rainMm = null) {
   const lx = w.ux * leanPx, ly = w.uy * leanPx;
   g.style.setProperty('--amp', `${Math.max(0.5, TREE.amp[b] * 0.6)}deg`);
   g.style.setProperty('--period', `${TREE.period[b]}s`);
+  g.style.setProperty('--lamp', `${TREE.leafAmp[b]}deg`);
+  g.style.setProperty('--lperiod', `${TREE.leafPeriod[b]}s`);
   g.style.setProperty('--lx', `${lx.toFixed(1)}px`); g.style.setProperty('--ly', `${ly.toFixed(1)}px`);
   g.style.setProperty('--fx', `${(w.ux * 90).toFixed(1)}px`); g.style.setProperty('--fy', `${(w.uy * 90).toFixed(1)}px`);
   // the trunk follows the crown: from the foot to the shifted crown centre
@@ -1373,14 +1527,26 @@ function makeWindField() {
   }
   return f;
 }
+/* Wind field per Beaufort (index 0..12), deliberately non-linear: at 0 Bft nothing; from 1 Bft enough faint,
+   slow streaks to read the direction; from 5 Bft the field grows clearly longer, thicker and faster. */
+const WIND_FIELD = {
+  count:  [0, 8, 10, 12, 14, 16, 16, 16, 16, 16, 16, 16, 16],                                // zichtbare streken (van 16)
+  op:     [0, 0.22, 0.26, 0.30, 0.36, 0.44, 0.52, 0.62, 0.72, 0.80, 0.86, 0.90, 0.92],        // dekking
+  len:    [0.5, 0.6, 0.8, 1.0, 1.3, 1.7, 2.1, 2.5, 2.9, 3.2, 3.5, 3.8, 4.0],                  // lengtefactor
+  period: [6, 4.5, 3.4, 2.6, 2.0, 1.5, 1.15, 0.9, 0.72, 0.6, 0.52, 0.46, 0.42],              // seconden per oversteek
+  stroke: [1.2, 1.2, 1.2, 1.3, 1.4, 1.7, 2.0, 2.3, 2.6, 2.8, 3.0, 3.0, 3.0],                  // lijndikte
+};
 function setWindField(f, kmh, dirDeg) {
   const b = beaufort(kmh || 0);
   const w = windScreen(dirDeg);
   f.style.setProperty('--travel', `${WIND_TRAVEL}px`);
-  f.style.setProperty('--wperiod', `${(6 / (1 + b * 0.9)).toFixed(2)}s`);
-  f.style.setProperty('--wop', (0.08 + Math.min(0.55, b * 0.07)).toFixed(2));
-  f.style.setProperty('--wlen', (0.6 + b * 0.25).toFixed(2));
+  f.style.setProperty('--wperiod', `${WIND_FIELD.period[b]}s`);
+  f.style.setProperty('--wop', String(WIND_FIELD.op[b]));
+  f.style.setProperty('--wlen', String(WIND_FIELD.len[b]));
+  f.style.setProperty('--wstroke', String(WIND_FIELD.stroke[b]));
   f.classList.toggle('calm', b === 0);
+  // the streaks are scattered evenly by index, so showing the first n keeps the field spread out
+  f.querySelectorAll('.streak').forEach((s, i) => { s.style.display = i < WIND_FIELD.count[b] ? '' : 'none'; });
   for (const s of f.querySelectorAll('.streak')) {
     // start half a travel upstream of the scatter point, so the streak passes through it
     const x = parseFloat(s.dataset.bx) - w.ux * WIND_TRAVEL / 2, y = parseFloat(s.dataset.by) - w.uy * WIND_TRAVEL / 2;
@@ -1425,18 +1591,21 @@ function renderInfo(c) {
   };
   sec('Wat je ziet', [
     'De app toont de verwachting voor de komende 48 uur voor de gekozen plaats. <b>Regen</b> begint met de radar voor de komende 2 uur (per 5 minuten) en daaronder de neerslag per uur met de kans op regen. <b>Overzicht</b> zet temperatuur en weerbeeld per uur naast elkaar. <b>Temperatuur</b>, <b>Wind</b> en <b>Bewolking</b> tonen elk hun eigen verloop.',
-    'Zoomen: knijp met twee vingers op een grafiek, of kies 6, 12, 24 of 48 uur. De grafiek begint altijd bij nu; de keuze wordt onthouden. Sleep met één vinger over een grafiek om de waarden van dat moment te zien; de stippellijn volgt je vinger.',
+    'Zoomen: knijp met twee vingers op een grafiek, of kies 12, 24 of 48 uur. De grafiek begint altijd bij nu; de keuze wordt onthouden. Sleep met één vinger over een grafiek om de waarden van dat moment te zien; de stippellijn volgt je vinger.',
     'De achtergrond van elke grafiek volgt de zon: warm bij daglicht, grijzer naarmate er meer bewolking is, donker in de nacht, met schemer ertussen. De zonnetjes boven de grafiek staan op zonsopkomst en -ondergang en tonen het weerbeeld van dat moment.',
   ]);
   sec('Waar de cijfers vandaan komen', [
     '<b>Nu-waarden</b> (temperatuur, wind) zijn echte metingen van het dichtstbijzijnde KNMI-weerstation, elke 10 minuten bijgewerkt, via de feed van Buienradar. De tegel noemt het station en de afstand.',
     '<b>Radar</b> voor de komende 2 uur: Buienradar-nowcast, een verplaatsing van het actuele radarbeeld.',
-    '<b>Verwachting per uur</b> (neerslag, temperatuur, wind, bewolking): het KNMI-weermodel HARMONIE-AROME, dat elk uur opnieuw rekent op een raster van 2 bij 2 km. In een eigen verificatie tegen KNMI-metingen bleek dit model voor regen op 1 tot 2 dagen vooruit het beste van de fijnmazige modellen; voor temperatuur is het gemiddeld een halve graad te warm.',
-    '<b>Kans op regen</b> en de <b>onzekerheidsband</b>: het ensemble ICON-D2-EPS van de Duitse weerdienst, twintig berekeningen met kleine verschillen in de beginsituatie. De kans is het aandeel berekeningen met minstens 0,1 mm in dat uur; de band toont waar 80% van de berekeningen zit. Het model zelf blijft de verwachting; het ensemble zegt alleen hoe zeker die is.',
+    '<b>Verwachting per uur</b> (neerslag, wind, bewolking): het KNMI-weermodel HARMONIE-AROME, dat elk uur opnieuw rekent op een raster van 2 bij 2 km. In een eigen verificatie tegen KNMI-metingen bleek dit model voor regen op 1 tot 2 dagen vooruit het beste van de fijnmazige modellen.',
+    '<b>Temperatuur</b>: het model ICON-D2 van de Duitse weerdienst (2,2 km). In dezelfde verificatie zat HARMONIE gemiddeld een halve graad te warm en zat ICON-D2 er duidelijk dichter bij.',
+    '<b>Kans op regen</b> en de <b>onzekerheidsband</b>: het ensemble ICON-D2-EPS van de Duitse weerdienst, twintig berekeningen met kleine verschillen in de beginsituatie. De kans is het aandeel berekeningen met minstens 0,1 mm in dat uur; met twintig berekeningen gaat die in stappen van 5%, dus "< 5%" betekent: geen van de twintig. De band toont waar 80% van de berekeningen zit. Bij temperatuur hoort de band bij hetzelfde model als de lijn; bij neerslag en wind komt hij voorlopig van een ander model dan de verwachting, waardoor ze elkaar soms tegenspreken.',
+    '<b>Eerstvolgende neerslag</b> volgt eerst de radar. Daarna telt een uur als nat als het model minstens 0,2 mm geeft én het ensemble een kans van minstens 30%. Anders staat er "Droog", met de hoogste kans in de komende 48 uur.',
+    '<b>Zonder verbinding</b> toont de app de laatst opgehaalde gegevens met het tijdstip waarop ze zijn opgehaald. Radar die al voorbij is en metingen van meer dan een uur oud worden dan niet meer getoond.',
     'Modeldata loopt via <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a>. Zonsopkomst, schemer en zonshoogte worden in de app zelf berekend.',
   ]);
   sec('Hoe je de grafieken leest', [
-    'Een <b>neerslagstaaf</b> is de som over dat uur; de radarstaven zijn de intensiteit op dat moment, in millimeter per uur. Lichte regen is 0,1 tot 1 mm per uur, matige regen 1 tot 4, zware regen meer dan 4.',
+    'Een <b>neerslagstaaf</b> is de som over dat uur; de radarstaven zijn de intensiteit op dat moment, in millimeter per uur. De uren die de radar dekt (ongeveer de eerste twee) komen ook in de uurgrafiek uit de radar, zodat beide grafieken hetzelfde zeggen; voor die uren staat er geen kans. Van het lopende uur telt alleen wat nog komt. Lichte regen is 0,1 tot 1 mm per uur, matige regen 1 tot 4, zware regen meer dan 4.',
     '<b>Windpijlen</b> wijzen waarheen de wind waait; in de tekst staat waar de wind vandaan komt, zoals gebruikelijk. Beaufort volgt uit de uursnelheid volgens de KNMI-tabel; de boom laat zien wat die kracht met een boom doet.',
     '<b>Bewolking</b> is het deel van de hemel dat bedekt is. De lijn wordt donkerder grijs naarmate er meer bewolking is.',
   ]);
@@ -1444,17 +1613,19 @@ function renderInfo(c) {
     '<table class="bft">' + BEAUFORT.map((b, i) => `<tr><td class="num">${i}</td><td>${b[0]}</td><td>${b[1]}</td></tr>`).join('') + '</table>',
   ]);
   sec('Bronnen en licenties', [
-    'Verwachting: KNMI, via Open-Meteo (CC BY 4.0). Ensemble: DWD ICON-D2-EPS, via Open-Meteo (CC BY 4.0). Radar en stationsmetingen: <a href="https://www.buienradar.nl" target="_blank" rel="noopener">Buienradar.nl</a>. Open-Meteo wordt gebruikt onder de voorwaarden voor niet-commercieel gebruik.',
-    'Deze app is een privéprototype. Instellingen zoals plaats en zoom blijven op je eigen telefoon; er worden geen gegevens verzameld.',
+    'Verwachting: KNMI, via Open-Meteo (CC BY 4.0). Temperatuur: DWD ICON-D2, via Open-Meteo (CC BY 4.0). Ensemble: DWD ICON-D2-EPS, via Open-Meteo (CC BY 4.0). Radar en stationsmetingen: <a href="https://www.buienradar.nl" target="_blank" rel="noopener">Buienradar.nl</a>. Open-Meteo wordt gebruikt onder de voorwaarden voor niet-commercieel gebruik.',
+    'Deze app is een privéprototype. Instellingen zoals plaats en zoom, en de laatst opgehaalde weergegevens, blijven op je eigen telefoon; er worden geen gegevens verzameld.',
   ]);
 }
 
 /* ---------------- Temperatuur ---------------- */
 function renderTemp(c) {
   const H = needHarmonie(c); if (!H) return;
-  const nowRow = H.instant[0];
-  const today = H.instant.filter(p => p.t.getDate() === nowRow.t.getDate());
-  const mx = Math.max(...today.map(p => p.temperature_2m)), mn = Math.min(...today.map(p => p.temperature_2m));
+  const T = tempModel();
+  const nowRow = T.instant[0];
+  const { mn, mx } = todayRange(T);
+  // the ICON-D2 ensemble band only belongs around an ICON-D2 line
+  const withBand = T.key === TEMP_MODEL.key;
   const o = state.obs;
   const tempIcon = '<svg class="ico-big" viewBox="0 0 24 24"><path d="M10 4a2 2 0 0 1 4 0v9.3a4 4 0 1 1-4 0V4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="17" r="1.6" fill="currentColor"/><path d="M12 10v7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
   if (o && o.temp != null) {
@@ -1470,15 +1641,15 @@ function renderTemp(c) {
   drawChart(k1.body, { sky: skyOf(),
     ...spanFor([H]), unit: '°C', unitTip: '°C', ticks: 'days', now: new Date(), yOpts: { minSpan: 6, targetTicks: 4 },
     series: [
-      ...ensBand('temperature_2m'),
-      { kind: 'line', name: 'Temperatuur', color: 'var(--s1)', points: instantPts(H, 'temperature_2m'), area: true, smooth: 'soft' },
-      { kind: 'line', name: 'Gevoelstemperatuur', color: 'var(--s1)', points: instantPts(H, 'apparent_temperature'), secondary: true, smooth: 'soft' },
+      ...(withBand ? ensBand('temperature_2m') : []),
+      { kind: 'line', name: 'Temperatuur', color: 'var(--s1)', points: instantPts(T, 'temperature_2m'), area: true, smooth: 'soft' },
+      { kind: 'line', name: 'Gevoelstemperatuur', color: 'var(--s1)', points: instantPts(T, 'apparent_temperature'), secondary: true, smooth: 'soft' },
     ],
-    fmt: v => fmtNum(v, 1), directLabels: 'minmax', tipTime: p => fmtDayTime(p.t), aria: 'Temperatuur per uur volgens HARMONIE',
-    tipExtra: t => { const r = state.ens && state.ens.bands.temperature_2m.find(q => Math.abs(q.t.getTime() - t) < HOUR / 2); return r ? `ensemble ${fmtNum(r.lo, 0)}° tot ${fmtNum(r.hi, 0)}°` : null; },
+    fmt: v => fmtNum(v, 1), directLabels: 'minmax', tipTime: p => fmtDayTime(p.t), aria: 'Temperatuur per uur',
+    tipExtra: t => { const r = withBand && state.ens && state.ens.bands.temperature_2m.find(q => Math.abs(q.t.getTime() - t) < HOUR / 2); return r ? `onzekerheid ${fmtNum(r.lo, 0)}° tot ${fmtNum(r.hi, 0)}°` : null; },
   });
-  legend(k1.el, [{ name: 'Temperatuur (2 m)', color: 'var(--s1)' }, { name: 'Gevoelstemperatuur', color: 'var(--s1)', dashed: true }, ...ensLegend()]);
-  k1.tableHost.appendChild(dataTable(H.instant, [{ label: 'Uur', get: p => fmtDayTime(p.t) }, { label: '°C', num: true, get: p => fmtNum(p.temperature_2m, 1) }, { label: 'Gevoel', num: true, get: p => fmtNum(p.apparent_temperature, 1) }]));
+  legend(k1.el, [{ name: 'Temperatuur (2 m)', color: 'var(--s1)' }, { name: 'Gevoelstemperatuur', color: 'var(--s1)', dashed: true }, ...(withBand ? ensLegend() : [])]);
+  k1.tableHost.appendChild(dataTable(T.instant, [{ label: 'Uur', get: p => fmtDayTime(p.t) }, { label: '°C', num: true, get: p => fmtNum(p.temperature_2m, 1) }, { label: 'Gevoel', num: true, get: p => fmtNum(p.apparent_temperature, 1) }]));
 }
 
 /* ---------------- Wind ---------------- */
@@ -1606,6 +1777,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
   if (!state.updated || Date.now() - state.updated.getTime() > 2 * 60e3) load();
 });
+window.addEventListener('online', () => { if (Object.values(state.fetched).some(f => f.stored) || Object.keys(state.errors).length) load(); });
 document.addEventListener('scroll', hideTooltip, true);
 
 /* ---- pinch-to-zoom on the multi-day charts: two touch pointers; the span start stays at "nu" ---- */
@@ -1659,7 +1831,8 @@ $('content').addEventListener('wheel', e => {
 /* ======================================================================
    6. Self-tests (open with ?test=1)
    ====================================================================== */
-const api = { raintextToMmh, parseRaintext, deriveCloudTotal, beaufort, compass, cloudWord, niceScale, parseForecast, parseEnsemble, parseObs, haversineKm, monotonePath, quantile, tickStepHours, compareRain, drawChart, tempColor, weatherIcon, hourIcons, treeView, setTree, makeTree, windTree, catmullRomPath, setWindField, makeWindField, BEAUFORT, spanFor, maxHorizonHours, sunAltitude, solarEvents, skyColor, sunPhase, sunGlyph, sunWeatherKind, weatherAt, MODELS, state };
+const api = { raintextToMmh, parseRaintext, deriveCloudTotal, beaufort, compass, cloudWord, niceScale, parseForecast, parseEnsemble, parseObs, haversineKm, monotonePath, quantile, tickStepHours, compareRain, drawChart, tempColor, weatherIcon, hourIcons, treeView, setTree, makeTree, windTree, catmullRomPath, setWindField, makeWindField, BEAUFORT, spanFor, maxHorizonHours, sunAltitude, solarEvents, skyColor, sunPhase, sunGlyph, sunWeatherKind, weatherAt, MODELS, state,
+  fmtProb, nextRain, freshOnly, storeSave, storeLoad, tempModel, todayRange, blendRain };
 window.Regen = api;
 
 function runTests() {
@@ -1959,6 +2132,125 @@ function runTests() {
       eq(s.tMax.getTime(), Math.min(H.horizon.getTime(), state.forecast.startHour.getTime() + 48 * HOUR), 'bereik blijft begrensd op 48 uur');
       near(maxHorizonHours(), 48, 1e-9, 'max horizon = 48 uur');
     } finally { state.forecast = saved.f; state.horizon = saved.hz; }
+  });
+
+  test('raintext: reeks die vlak vóór middernacht begint blijft op de oude dag', () => {
+    const r = parseRaintext('000|23:55\n080|00:00\n080|00:05', new Date(2026, 10, 2, 0, 2));
+    eq(r[0].t.getDate(), 1, 'dag 23:55'); eq(r[1].t.getDate(), 2, 'dag 00:00'); ok(r[1].t > r[0].t && r[2].t > r[1].t, 'oplopend');
+  });
+  test('raintext: oude kopie wordt op haar eigen ophaaltijd gedateerd, niet naar morgen geschoven', () => {
+    const r = parseRaintext('120|10:00\n120|10:05', new Date(2026, 10, 1, 10, 2));
+    eq(r[0].t.getDate(), 1); eq(r[0].t.getHours(), 10);
+  });
+  test('kans: stappen van 5%, en geen "0%" of "100%"', () => {
+    eq(fmtProb(0), '< 5%'); eq(fmtProb(0.049), '< 5%'); eq(fmtProb(0.05), '5%'); eq(fmtProb(0.35), '35%'); eq(fmtProb(0.95), '95%'); eq(fmtProb(1), '> 95%'); eq(fmtProb(null), '–');
+  });
+
+  // eerstvolgende neerslag: nu = 31 okt 20:18; staaf i van HARMONIE = waarde bij index i, uur (i−1)–i
+  const mkNc = (start, n, wet = {}) => Array.from({ length: n }, (_, i) => ({ t: new Date(start.getTime() + i * MIN5), v: wet[i] || 0 }));
+  const ncFrom = new Date(2026, 9, 31, 20, 15); // 24 slots: 20:15 t/m 22:10, radar loopt tot 22:15
+  const mkEns = (probs) => ({ prob: Object.entries(probs).map(([hr, v]) => ({ t: new Date(2026, 9, 31, +hr), tEnd: new Date(2026, 9, 31, +hr + 1), v })) });
+  const mkH = (mut) => parseForecast(mkJson(undefined, hh => mut(hh['precipitation_knmi_harmonie_arome_netherlands'])), NOW).models.harmonie;
+  test('eerstvolgende neerslag: radar eerst, ook het slot waar we nu in zitten', () => {
+    const H = mkH(() => {});
+    let r = nextRain(mkNc(ncFrom, 24, { 1: 0.5 }), H, null, NOW);
+    eq(r.kind, 'radar'); eq(r.t.getMinutes(), 20); eq(r.now, false);
+    r = nextRain(mkNc(ncFrom, 24, { 0: 0.4 }), H, null, NOW);
+    eq(r.kind, 'radar'); eq(r.now, true, 'regent nu');
+  });
+  test('eerstvolgende neerslag: model-uren die de droge radar al dekt tellen niet mee', () => {
+    const H = mkH(p => { p[22] = 1.0; p[24] = 1.0; }); // 21–22 (onder de radar) en 23–24
+    const r = nextRain(mkNc(ncFrom, 24), H, mkEns({ 21: 0.8, 23: 0.6 }), NOW);
+    eq(r.kind, 'model'); eq(r.t.getHours(), 23); eq(r.prob, 0.6);
+  });
+  test('eerstvolgende neerslag: een half gedekt uur telt vanaf het einde van de radar', () => {
+    const H = mkH(p => { p[23] = 0.5; }); // 22–23, radar tot 22:15
+    const r = nextRain(mkNc(ncFrom, 24), H, mkEns({ 22: 0.5 }), NOW);
+    eq(r.kind, 'model'); eq(r.t.getHours(), 22); eq(r.t.getMinutes(), 15);
+  });
+  test('eerstvolgende neerslag: spoortjes (0,1 mm) en lage kans (< 30%) zijn droog, met de hoogste kans erbij', () => {
+    const H = mkH(p => { p[24] = 0.1; p[27] = 2.0; }); // 23–24 spoortjes, 02–03 veel maar onwaarschijnlijk
+    const ens = { prob: [...mkEns({ 23: 0.2 }).prob, { t: new Date(2026, 10, 1, 2), tEnd: new Date(2026, 10, 1, 3), v: 0.1 }] };
+    const r = nextRain(mkNc(ncFrom, 24), H, ens, NOW);
+    eq(r.kind, 'dry'); near(r.maxP, 0.2, 1e-9); eq(r.maxT.getHours(), 23);
+    eq((r.until - H.instant[0].t) / HOUR, 48, 'droog t/m 48 uur vooruit');
+  });
+  test('eerstvolgende neerslag: zonder ensemble beslist 0,2 mm; regen na 48 uur telt niet', () => {
+    let r = nextRain(null, mkH(p => { p[30] = 0.3; }), null, NOW);
+    eq(r.kind, 'model'); eq(r.prob, null); eq(r.t.getHours(), 5);
+    r = nextRain(null, mkH(p => { p[21 + 50] = 5; }), null, NOW);
+    eq(r.kind, 'dry');
+    eq(nextRain(null, null, null, NOW), null, 'geen data');
+    eq(nextRain(mkNc(ncFrom, 24), null, null, NOW).kind, 'dry', 'alleen radar, droog');
+  });
+  test('uurstaven: de uren onder de radar komen uit de radar, het uur erna deels uit het model', () => {
+    const H = mkH(p => { p[21] = 1; p[22] = 1; p[23] = 1; p[24] = 1; }); // 20–21 … 23–24 elk 1 mm volgens het model
+    const b = blendRain(H.interval, mkNc(ncFrom, 24, { 1: 6 })); // radar 20:15–22:15, om 20:20 6 mm/u = 0,5 mm
+    near(b[0].precipitation, 0.5, 1e-9, '20–21 radar'); eq(b[0].src, 'radar'); eq(b[0].model, 1);
+    eq(b[1].precipitation, 0, '21–22 radar droog, model telt niet'); eq(b[1].src, 'radar');
+    near(b[2].precipitation, 0.75, 1e-9, '22–23: radar droog tot 22:15, daarna 45 min model'); eq(b[2].src, 'mix');
+    eq(b[3].precipitation, 1, '23–24 alleen model'); eq(b[3].src, undefined);
+    eq(blendRain(H.interval, null), H.interval, 'zonder radar ongewijzigd');
+    const t = blendRain(mkH(p => { p[23] = 0.1; }).interval, mkNc(new Date(2026, 9, 31, 20, 15), 32)); // radar tot 22:55
+    eq(t[2].precipitation, 0, '5 min van 0,1 mm = 0,008 mm: droog'); eq(t[2].src, 'mix');
+    eq(probFor(b[0]), null, 'geen kans voor een radaruur');
+  });
+  test('windveld: niets bij 0 Bft, genoeg vage streken voor de richting bij 1 Bft, dik en snel vanaf 7 Bft', () => {
+    const f = makeWindField();
+    const shown = () => [...f.querySelectorAll('.streak')].filter(s => s.style.display !== 'none').length;
+    setWindField(f, 0.5, 270); eq(shown(), 0, '0 Bft'); ok(f.classList.contains('calm'));
+    setWindField(f, 3, 270); eq(shown(), 8, '1 Bft'); eq(f.style.getPropertyValue('--wop'), '0.22');
+    setWindField(f, 33, 270); eq(shown(), 16, '5 Bft');
+    setWindField(f, 70, 270); ok(parseFloat(f.style.getPropertyValue('--wstroke')) > 2.5, 'dikker bij 8 Bft');
+    for (const k of Object.keys(WIND_FIELD)) { const a = WIND_FIELD[k]; eq(a.length, 13, k); for (let i = 1; i < 13; i++) ok(k === 'period' ? a[i] <= a[i - 1] : a[i] >= a[i - 1], `${k} monotoon bij ${i}`); }
+  });
+  test('blaadjes: bijna stil bij 0–1 Bft, ritselen bij 2, steeds wijder en sneller', () => {
+    const g = makeTree(1);
+    windTree(g, 3, 270); eq(g.style.getPropertyValue('--lamp'), '2deg', '1 Bft');
+    windTree(g, 33, 270); eq(g.style.getPropertyValue('--lamp'), '20deg', '5 Bft'); eq(g.style.getPropertyValue('--lperiod'), '0.3s');
+    eq(TREE.leafAmp.length, 13); eq(TREE.leafPeriod.length, 13);
+    for (let i = 1; i < 13; i++) { ok(TREE.leafAmp[i] > TREE.leafAmp[i - 1], `uitslag stijgt bij ${i}`); ok(TREE.leafPeriod[i] < TREE.leafPeriod[i - 1], `tempo stijgt bij ${i}`); }
+  });
+  test('verouderd: afgelopen radarslots en metingen ouder dan een uur vallen weg', () => {
+    const nc = mkNc(new Date(2026, 9, 31, 18, 0), 24); // 18:00–19:55, nu 20:18: helemaal voorbij
+    const f = freshOnly(nc, { time: new Date(2026, 9, 31, 19, 10) }, NOW);
+    eq(f.nowcast, null, 'radar voorbij'); eq(f.obs, null, 'meting 68 min oud');
+    const g = freshOnly(mkNc(ncFrom, 24), { time: new Date(2026, 9, 31, 20, 0) }, NOW);
+    eq(g.nowcast.length, 24); ok(g.obs, 'meting van 18 min geleden blijft');
+  });
+  test('bewaarde kopie: alleen voor dezelfde plaats en niet te oud', () => {
+    const key = STORE_PREFIX + 'nowcast';
+    let saved = null; try { saved = localStorage.getItem(key); } catch (e) {}
+    try {
+      const at = new Date(2026, 9, 31, 20, 0);
+      storeSave('nowcast', { lat: 52.37, lon: 4.9 }, 'tekst', at);
+      const s = storeLoad('nowcast', { lat: 52.37, lon: 4.9 }, new Date(2026, 9, 31, 20, 30));
+      ok(s && s.body === 'tekst' && s.at.getTime() === at.getTime(), 'zelfde plaats');
+      eq(storeLoad('nowcast', { lat: 51.44, lon: 5.48 }, new Date(2026, 9, 31, 20, 30)), null, 'andere plaats');
+      eq(storeLoad('nowcast', { lat: 52.37, lon: 4.9 }, new Date(2026, 9, 31, 23, 0)), null, 'ouder dan 2 uur');
+    } finally { try { if (saved == null) localStorage.removeItem(key); else localStorage.setItem(key, saved); } catch (e) {} }
+  });
+  test('verouderd-melding: een kopie van een paar minuten telt als actueel; alles of deels', () => {
+    const saved = state.fetched;
+    try {
+      const at = m => ({ at: new Date(NOW.getTime() - m * 60e3), stored: true }), fresh = { at: NOW, stored: false };
+      state.fetched = { forecast: fresh, ens: fresh, nowcast: fresh, obs: at(2) };
+      eq(staleSince(NOW), null, 'feed van 2 min oud: geen melding');
+      state.fetched = { forecast: fresh, ens: fresh, nowcast: fresh, obs: at(30) };
+      let s = staleSince(NOW); ok(s && !s.all, 'deels'); eq(s.since.getMinutes(), 48);
+      state.fetched = { forecast: at(40), ens: at(40), nowcast: at(40), obs: at(40) };
+      s = staleSince(NOW); ok(s && s.all, 'alles: geen verbinding');
+    } finally { state.fetched = saved; }
+  });
+  test('temperatuur: ICON-D2 als dat er is, anders HARMONIE', () => {
+    const saved = state.forecast;
+    try {
+      state.forecast = parseForecast(mkJson(undefined, hh => { hh['temperature_2m_icon_d2'][20] = 7; }), NOW);
+      eq(tempModel().key, 'icon'); eq(tempModel().instant[0].temperature_2m, 7);
+      state.forecast = parseForecast(mkJson({ harmonie: 70, icon: 0, arome: 0 }), NOW);
+      eq(tempModel().key, 'harmonie');
+      const { mn, mx } = todayRange(state.forecast.models.harmonie); eq(mn, 10); eq(mx, 10);
+    } finally { state.forecast = saved; }
   });
 
   const panel = h('div', 'tests');
