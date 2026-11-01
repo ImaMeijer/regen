@@ -106,3 +106,10 @@ Knijpen tekent de grafieken in place opnieuw (de bezig-aanraking blijft op hetze
 - **Overzicht:** temperatuur als vloeiende lijn met vlak, gekleurd langs de lijn (blauw → amber → rood). Tussen de temperatuurgrafiek en de neerslag een rij boompjes die de wind van dat uur tonen: één per weericoontje als er minstens 26 px tussen zit, anders één per twee icoontjes.
 - **Boommodel** (één SVG-model, groot op de windpagina en klein in de rij): gebogen stam, vijf takken, lancetvormige blaadjes in twee groentinten aan de toppen en halverwege de takken. Stam en takken zwaaien met amplitude en tempo per Beaufort, de boom leunt naar de kant waarheen de wind waait, en vanaf 5 Bft vliegen blaadjes weg.
 - **Rook** op de windpagina: een schoorsteentje met pluim die bij windstilte recht omhoog gaat en met meer wind steeds platter wegwaait in de windrichting, naar de KNMI-omschrijving voor 0 en 1 Bft.
+
+## Versie 9: zachtere lijnen, cartoonboom met windveld, boompjes per wolkje
+
+- **Lijnen:** temperatuur, gevoelstemperatuur, wind en windstoten gebruiken nu een Catmull-Rom-spline (spanning 0,5): zachter dan de monotone interpolatie, met een klein beetje overshoot dat als natuurlijke curve leest. De kanslijn houdt de monotone variant, zodat die nooit buiten 0–100% komt.
+- **Boom:** bruine stam en takken met donkere rand; blaadjes als druppelvorm met nerf in twee groentinten, aan de toppen en halverwege de takken. Plaatsing en animatie zitten in gescheiden groepen (de CSS-animatie overschreef anders de SVG-transform). Ook bij windstilte een minimale beweging van 0,5°, zodat de boom nooit bevriest. Bij regen in dat uur vallen druppels schuin met de wind mee.
+- **Windveld** op de windpagina in plaats van rook: zestien streken die in de windrichting stromen, met snelheid, lengte en dekking die oplopen met Beaufort; wind naar het noorden (van de kijker af) laat ze licht stijgen, naar het zuiden licht dalen.
+- **Boompjesrij** in het overzicht: onder elk weericoontje een boompje op dezelfde uren, geschaald naar de ruimte (0,2–0,3), met regen waar het regent.

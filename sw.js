@@ -1,6 +1,6 @@
 /* Service worker: app-schil offline beschikbaar, data altijd eerst van het netwerk.
    Bump CACHE bij elke release zodat oude schillen worden opgeruimd. */
-const CACHE = 'regen-v8';
+const CACHE = 'regen-v9';
 const SHELL = ['./', './index.html', './app.css', './app.js', './manifest.json', './icon.svg'];
 
 self.addEventListener('install', e => {

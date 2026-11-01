@@ -167,6 +167,20 @@ function cloudGrey(pct) {
   const c = mix(lo, hi, clamp(pct, 0, 100) / 100);
   return `rgb(${c[0]},${c[1]},${c[2]})`;
 }
+/* Catmull-Rom spline through screen points as cubic beziers. tension 0 = straight, 0.5 = classic; a little
+   overshoot is allowed, which reads as a natural curve for temperature and wind. */
+function catmullRomPath(pts, tension = 0.5) {
+  const n = pts.length;
+  if (n < 2) return n ? `M${pts[0].x},${pts[0].y}` : '';
+  let d = `M${pts[0].x},${pts[0].y}`;
+  for (let i = 0; i < n - 1; i++) {
+    const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(n - 1, i + 2)];
+    const c1x = p1.x + (p2.x - p0.x) * tension / 3, c1y = p1.y + (p2.y - p0.y) * tension / 3;
+    const c2x = p2.x - (p3.x - p1.x) * tension / 3, c2y = p2.y - (p3.y - p1.y) * tension / 3;
+    d += ` C${c1x.toFixed(2)},${c1y.toFixed(2)} ${c2x.toFixed(2)},${c2y.toFixed(2)} ${p2.x.toFixed(2)},${p2.y.toFixed(2)}`;
+  }
+  return d;
+}
 /* Monotone cubic (Fritsch–Carlson) through screen points: smooth, never overshoots the data. */
 function monotonePath(pts) {
   const n = pts.length;
@@ -511,23 +525,23 @@ function drawChart(host, spec) {
     spec.icons.forEach((ic, i) => {
       if (i % iconStep) return;
       const px = x(ic.t.getTime());
-      if (px < m.left + 6 || px > W - m.right - 6) return;
+      if (px < m.left - 2 || px > W - m.right + 2) return;
       svg.appendChild(weatherIcon(px, m.top - 12, ic.kind, ic.night));
     });
   }
-  // little trees under the x labels: one per icon when ≥ 26 px apart, else one per two icons
+  // little trees under the x labels, one under every weather icon (same hours), sized to the spacing
   if (spec.trees && !compact) {
-    const step = iconStep * (iconStep * pxPerHour >= 26 ? 1 : 2);
-    const yRow = m.top + ph + 24 + arrowRow;
+    const spacing = iconStep * pxPerHour;
+    const s = clamp(spacing / 95, 0.2, 0.3);
+    const yRow = m.top + ph + 24 + arrowRow + (0.3 - s) * 40;
     spec.trees.forEach((tr, i) => {
-      if (i % step || tr.kmh == null) return;
+      if (i % iconStep || tr.kmh == null) return;
       const px = x(tr.t.getTime());
-      if (px < m.left + 8 || px > W - m.right - 8) return;
-      const s = 0.27;
+      if (px < m.left - 2 || px > W - m.right + 2) return;
       const g = svgEl('g', { class: 'mtree', transform: `translate(${(px - 50 * s).toFixed(1)},${yRow.toFixed(1)})` });
-      const t = makeTree(s, false);
-      windTree(t, tr.kmh, tr.dir);
-      t.appendChild(svgEl('title', {}, `${fmtTime(tr.t)} · ${fmtNum(tr.kmh, 0)} km/u · ${beaufort(tr.kmh)} Bft uit ${compass(tr.dir)}`));
+      const t = makeTree(s);
+      windTree(t, tr.kmh, tr.dir, tr.rain);
+      t.appendChild(svgEl('title', {}, `${fmtTime(tr.t)} · ${fmtNum(tr.kmh, 0)} km/u · ${beaufort(tr.kmh)} Bft uit ${compass(tr.dir)}${tr.rain >= 0.1 ? ` · ${fmtMm(tr.rain)} mm` : ''}`));
       g.appendChild(t);
       svg.appendChild(g);
     });
@@ -580,7 +594,7 @@ function drawChart(host, spec) {
       const pts = s.points.filter(p => p.v != null);
       if (!pts.length) continue;
       const scr = pts.map(p => ({ x: x(p.t.getTime()), y: y(p.v) }));
-      const lineD = s.smooth ? monotonePath(scr) : scr.map((p, i) => `${i ? 'L' : 'M'}${p.x},${p.y}`).join(' ');
+      const lineD = s.smooth === 'soft' ? catmullRomPath(scr, 0.5) : s.smooth ? monotonePath(scr) : scr.map((p, i) => `${i ? 'L' : 'M'}${p.x},${p.y}`).join(' ');
       // optional value-driven colour along the line (e.g. grey that darkens with cloud cover)
       let paint = s.color;
       if (s.colorAt && pts.length > 1) {
@@ -1207,10 +1221,10 @@ function renderOverview(c) {
   const icons = hourIcons(H);
   const pts = H.instant.map(r => ({ t: r.t, tEnd: new Date(r.t.getTime() + HOUR), v: r.temperature_2m, row: r }));
   const iconFor = p => icons.find(i => i.hour.getTime() === p.t.getTime());
-  const trees = H.instant.map(r => ({ t: new Date(r.t.getTime() + HOUR / 2), kmh: r.wind_speed_10m, dir: r.wind_direction_10m }));
+  const trees = H.instant.map(r => { const iv = H.interval.find(p => p.t.getTime() === r.t.getTime()); return { t: new Date(r.t.getTime() + HOUR / 2), kmh: r.wind_speed_10m, dir: r.wind_direction_10m, rain: iv ? iv.precipitation : null }; });
   drawChart(k.body, { sky: skyOf(), group: 'overview',
     ...spanFor([H]), unit: '°C', unitTip: '°C', ticks: 'days', now, yOpts: { minSpan: 8, targetTicks: 4 }, icons, trees,
-    series: [{ kind: 'line', name: 'Temperatuur', color: 'var(--s2)', colorAt: tempColor, points: pts.map(p => ({ t: p.t, v: p.v, row: p.row })), smooth: true, area: true, areaOpacity: 0.16 }],
+    series: [{ kind: 'line', name: 'Temperatuur', color: 'var(--s2)', colorAt: tempColor, points: pts.map(p => ({ t: p.t, v: p.v, row: p.row })), smooth: 'soft', area: true, areaOpacity: 0.16 }],
     fmt: v => fmtNum(v, 0), directLabels: 'minmax', tipTime: p => fmtDayTime(p.t),
     tipNote: (s, p) => { const ic = iconFor(p); const iv = H.interval.find(q => q.t.getTime() === p.t.getTime()); return (ic ? ` · ${ic.kind === 'clear' && ic.night ? 'helder' : ICON_WORDS[ic.kind]}` : '') + (iv && iv.precipitation >= 0.1 ? ` · ${fmtMm(iv.precipitation)} mm` : ''); },
     aria: 'Temperatuur per uur met weericoontjes',
@@ -1257,67 +1271,106 @@ const TREE_BRANCHES = [
   { d: 'M57 44 C60 34 62 26 64 18', end: [64, 18], ang: -70 },
   { d: 'M57 46 C66 40 74 36 82 30', end: [82, 30], ang: 32 },
 ];
-function makeTree(scale = 1, withSmoke = false) {
+/* cartoon leaf: teardrop with a vein, drawn along +x from its stem at (0,0); rotated into place */
+const LEAF_D = 'M0 0 C1.5 -4.2 6.5 -5.4 11 -2.2 C9.5 2.4 5 4.4 0 0 Z';
+function makeTree(scale = 1) {
   const g = svgEl('g', { class: 'treeg' });
   const sway = svgEl('g', { class: 'tree-sway' }); // rotates around the foot: lean + sway
+  // brown trunk with a darker outline (outline drawn first, wider)
+  sway.appendChild(svgEl('path', { class: 'trunk edge', d: 'M50 106 C51 92 46 80 50 66 C53 56 54 48 56 40' }));
   sway.appendChild(svgEl('path', { class: 'trunk', d: 'M50 106 C51 92 46 80 50 66 C53 56 54 48 56 40' }));
+  sway.appendChild(svgEl('path', { class: 'trunk thin edge', d: 'M52 66 C55 56 56 46 58 34' }));
   sway.appendChild(svgEl('path', { class: 'trunk thin', d: 'M52 66 C55 56 56 46 58 34' }));
   TREE_BRANCHES.forEach((b, i) => {
     const [, ox, oy] = b.d.match(/M(\d+) (\d+)/);
     const br = svgEl('g', { class: 'branch', style: `transform-origin:${ox}px ${oy}px;animation-delay:${(-i * 0.23).toFixed(2)}s` });
+    br.appendChild(svgEl('path', { class: 'bough edge', d: b.d }));
     br.appendChild(svgEl('path', { class: 'bough', d: b.d }));
     // leaves fanned out around the branch tip, plus two halfway along the branch, alternating the two greens
     const [ex, ey] = b.end;
-    const leaf = (lx, ly, a, k) => br.appendChild(svgEl('ellipse', { class: `leaf ${k % 2 ? 'alt' : ''}`, cx: lx.toFixed(1), cy: ly.toFixed(1), rx: 6.2, ry: 3, transform: `rotate(${a.toFixed(0)} ${lx.toFixed(1)} ${ly.toFixed(1)})`, style: `transform-origin:${lx.toFixed(1)}px ${ly.toFixed(1)}px;animation-delay:${(-(i * 6 + k) * 0.17).toFixed(2)}s` }));
+    // outer group carries the SVG placement; the inner group is what the CSS flutter animates (it would
+    // otherwise overwrite the placement transform)
+    const leaf = (lx, ly, a, k) => {
+      const place = svgEl('g', { transform: `translate(${lx.toFixed(1)},${ly.toFixed(1)}) rotate(${a.toFixed(0)})` });
+      const lg = svgEl('g', { class: `leaf ${k % 2 ? 'alt' : ''}`, style: `animation-delay:${(-(i * 6 + k) * 0.17).toFixed(2)}s` });
+      lg.appendChild(svgEl('path', { class: 'blade', d: LEAF_D }));
+      lg.appendChild(svgEl('path', { class: 'vein', d: 'M0.8 -0.2 L9.6 -2.4' }));
+      place.appendChild(lg);
+      br.appendChild(place);
+    };
     for (let k = 0; k < 4; k++) {
-      const a = b.ang + (k - 1.5) * 38;
-      leaf(ex + Math.cos(rad(a)) * 6, ey + Math.sin(rad(a)) * 6, a, k);
+      const a = b.ang + (k - 1.5) * 40;
+      leaf(ex + Math.cos(rad(a)) * 2, ey + Math.sin(rad(a)) * 2, a, k);
     }
     const nums = b.d.match(/-?\d+(\.\d+)?/g).map(Number); // M x0 y0 C x1 y1 x2 y2 x3 y3
     const at = (tt) => { const u = 1 - tt; return [0, 1].map(j => u * u * u * nums[j] + 3 * u * u * tt * nums[2 + j] + 3 * u * tt * tt * nums[4 + j] + tt * tt * tt * nums[6 + j]); };
     const [mx, my] = at(0.55);
-    leaf(mx + Math.cos(rad(b.ang - 90)) * 5, my + Math.sin(rad(b.ang - 90)) * 5, b.ang - 60, 4);
-    leaf(mx + Math.cos(rad(b.ang + 90)) * 5, my + Math.sin(rad(b.ang + 90)) * 5, b.ang + 60, 5);
+    leaf(mx, my, b.ang - 70, 4);
+    leaf(mx, my, b.ang + 70, 5);
     sway.appendChild(br);
   });
   g.appendChild(sway);
   const flyers = svgEl('g', { class: 'flyers' });
-  for (let i = 0; i < 5; i++) flyers.appendChild(svgEl('ellipse', { class: `flyer ${i % 2 ? 'alt' : ''}`, cx: 50 + (i - 2) * 7, cy: 40 + (i % 3) * 9, rx: 5, ry: 2.4, style: `animation-delay:${(-i * 0.41).toFixed(2)}s` }));
-  g.appendChild(flyers);
-  if (withSmoke) {
-    const smoke = svgEl('g', { class: 'smoke' });
-    smoke.appendChild(svgEl('rect', { class: 'chimney', x: 10, y: 96, width: 6, height: 10, rx: 1 }));
-    for (let i = 0; i < 5; i++) smoke.appendChild(svgEl('circle', { class: 'puff', r: 2 + i * 0.7, style: `animation-delay:${(-i * 0.5).toFixed(2)}s` }));
-    g.appendChild(smoke);
+  for (let i = 0; i < 5; i++) {
+    const place = svgEl('g', { transform: `translate(${50 + (i - 2) * 7},${40 + (i % 3) * 9})` });
+    const fg = svgEl('g', { class: `flyer ${i % 2 ? 'alt' : ''}`, style: `animation-delay:${(-i * 0.41).toFixed(2)}s` });
+    fg.appendChild(svgEl('path', { class: 'blade', d: LEAF_D }));
+    place.appendChild(fg);
+    flyers.appendChild(place);
   }
+  g.appendChild(flyers);
+  // rain over the tree, shown only when the hour is wet
+  const rain = svgEl('g', { class: 'raindrops' });
+  for (let i = 0; i < 7; i++) rain.appendChild(svgEl('line', { x1: 18 + i * 11, y1: 8, x2: 16.5 + i * 11, y2: 16, style: `animation-delay:${(-i * 0.19).toFixed(2)}s` }));
+  g.appendChild(rain);
   if (scale !== 1) g.setAttribute('transform', `scale(${scale})`);
   return g;
 }
-/* apply a wind to a tree group: lean/sway from Beaufort, direction = where the wind blows to */
-function windTree(g, kmh, dirDeg) {
+/* apply a wind (and optional rain) to a tree group: lean/sway from Beaufort, direction = where the wind blows to.
+   Even at 0 Bft the tree keeps a faint breathing motion so it never looks frozen. */
+function windTree(g, kmh, dirDeg, rainMm = null) {
   const b = beaufort(kmh || 0);
   const dx = Math.sin(rad((dirDeg == null ? 270 : dirDeg) + 180)); // +x = naar rechts
   const sign = Math.abs(dx) < 0.3 ? (dx < 0 ? -0.3 : 0.3) : dx;
-  g.style.setProperty('--amp', `${TREE.amp[b]}deg`);
+  g.style.setProperty('--amp', `${Math.max(0.5, TREE.amp[b])}deg`);
   g.style.setProperty('--lean', `${(TREE.lean[b] * sign).toFixed(1)}deg`);
   g.style.setProperty('--period', `${TREE.period[b]}s`);
   g.style.setProperty('--dx', sign.toFixed(2));
+  g.style.setProperty('--rainslant', `${(-sign * Math.min(12, 2 + 3 * b)).toFixed(1)}px`);
   g.classList.toggle('flying', b >= 5);
-  g.classList.toggle('still', b === 0);
+  g.classList.toggle('raining', rainMm != null && rainMm >= 0.1);
   g.dataset.bft = b;
-  // smoke: straight up when calm, bending and flattening with the wind
-  g.querySelectorAll('.puff').forEach((p, i) => {
-    const bend = sign * Math.min(40, i * i * (0.3 + 1.1 * b));
-    const rise = Math.max(2.5, 8 - 0.7 * b) * i;
-    p.setAttribute('cx', (13 + bend).toFixed(1)); p.setAttribute('cy', (94 - rise).toFixed(1));
-  });
   return b;
+}
+/* animated wind field: streaks flowing in the wind direction, faster and bolder with more wind */
+function makeWindField() {
+  const f = svgEl('g', { class: 'windfield' });
+  const inner = svgEl('g', { class: 'windfield-inner' });
+  for (let i = 0; i < 16; i++) {
+    const y = 6 + ((i * 37) % 96), len = 10 + ((i * 13) % 14);
+    inner.appendChild(svgEl('line', { x1: -70 - ((i * 29) % 60), y1: y, x2: -70 - ((i * 29) % 60) + len, y2: y, style: `animation-delay:${(-(i * 0.47) % 4).toFixed(2)}s` }));
+  }
+  f.appendChild(inner);
+  return f;
+}
+function setWindField(f, kmh, dirDeg) {
+  const b = beaufort(kmh || 0);
+  const to = rad((dirDeg == null ? 270 : dirDeg) + 180);
+  const dx = Math.sin(to), dn = Math.cos(to); // dn > 0: wind blows north (away from the viewer)
+  const sign = Math.abs(dx) < 0.3 ? (dx < 0 ? -1 : 1) : Math.sign(dx);
+  const tilt = -dn * 12; // away = streaks rise a little, towards = they dip a little
+  f.style.setProperty('--wangle', `${(sign < 0 ? 180 - tilt : tilt).toFixed(1)}deg`);
+  f.style.setProperty('--wperiod', `${(6 / (1 + b * 0.9)).toFixed(2)}s`);
+  f.style.setProperty('--wop', (0.08 + Math.min(0.55, b * 0.07)).toFixed(2));
+  f.style.setProperty('--wlen', (0.6 + b * 0.25).toFixed(2));
+  f.classList.toggle('calm', b === 0);
 }
 function treeView() {
   const wrap = h('div', 'tree');
   const svg = svgEl('svg', { viewBox: '0 0 100 110', 'aria-hidden': 'true' });
+  svg.appendChild(makeWindField());
   svg.appendChild(svgEl('line', { class: 'ground', x1: 6, x2: 94, y1: 106, y2: 106 }));
-  svg.appendChild(makeTree(1, true));
+  svg.appendChild(makeTree(1));
   wrap.appendChild(svg);
   const txt = h('div', 'tree-text');
   txt.appendChild(h('div', 'tree-caption'));
@@ -1325,13 +1378,14 @@ function treeView() {
   wrap.appendChild(txt);
   return wrap;
 }
-function setTree(el, kmh, dirDeg, label) {
+function setTree(el, kmh, dirDeg, label, rainMm = null) {
   const g = el.querySelector('.treeg');
-  const b = windTree(g, kmh, dirDeg);
+  const b = windTree(g, kmh, dirDeg, rainMm);
+  setWindField(el.querySelector('.windfield'), kmh, dirDeg);
   for (const k of ['--amp', '--lean', '--period', '--dx']) el.style.setProperty(k, g.style.getPropertyValue(k));
   el.classList.toggle('flying', b >= 5); el.classList.toggle('still', b === 0);
   el.dataset.bft = b;
-  el.querySelector('.tree-caption').textContent = `${label} · ${fmtNum(kmh || 0, 0)} km/u · ${b} Bft`;
+  el.querySelector('.tree-caption').textContent = `${label} · ${fmtNum(kmh || 0, 0)} km/u · ${b} Bft${rainMm != null && rainMm >= 0.1 ? ` · ${fmtMm(rainMm)} mm` : ''}`;
   el.querySelector('.tree-desc').textContent = `${BEAUFORT[b][0]}: ${BEAUFORT[b][1]}`;
 }
 
@@ -1391,8 +1445,8 @@ function renderTemp(c) {
     ...spanFor([H]), unit: '°C', unitTip: '°C', ticks: 'days', now: new Date(), yOpts: { minSpan: 6, targetTicks: 4 },
     series: [
       ...ensBand('temperature_2m'),
-      { kind: 'line', name: 'Temperatuur', color: 'var(--s1)', points: instantPts(H, 'temperature_2m'), area: true },
-      { kind: 'line', name: 'Gevoelstemperatuur', color: 'var(--s1)', points: instantPts(H, 'apparent_temperature'), secondary: true },
+      { kind: 'line', name: 'Temperatuur', color: 'var(--s1)', points: instantPts(H, 'temperature_2m'), area: true, smooth: 'soft' },
+      { kind: 'line', name: 'Gevoelstemperatuur', color: 'var(--s1)', points: instantPts(H, 'apparent_temperature'), secondary: true, smooth: 'soft' },
     ],
     fmt: v => fmtNum(v, 1), directLabels: 'minmax', tipTime: p => fmtDayTime(p.t), aria: 'Temperatuur per uur volgens HARMONIE',
     tipExtra: t => { const r = state.ens && state.ens.bands.temperature_2m.find(q => Math.abs(q.t.getTime() - t) < HOUR / 2); return r ? `ensemble ${fmtNum(r.lo, 0)}° tot ${fmtNum(r.hi, 0)}°` : null; },
@@ -1422,18 +1476,19 @@ function renderWind(c) {
     ...spanFor([H]), unit: 'km/u', unitTip: 'km/u', ticks: 'days', now: new Date(), yOpts: { zero: true, minSpan: 20, headroom: 1.1 },
     series: [
       ...ensBand('wind_speed_10m'),
-      { kind: 'line', name: 'Wind', color: 'var(--s1)', points: instantPts(H, 'wind_speed_10m'), area: true },
-      { kind: 'line', name: 'Windstoten', color: 'var(--s1)', points: instantPts(H, 'wind_gusts_10m'), secondary: true },
+      { kind: 'line', name: 'Wind', color: 'var(--s1)', points: instantPts(H, 'wind_speed_10m'), area: true, smooth: 'soft' },
+      { kind: 'line', name: 'Windstoten', color: 'var(--s1)', points: instantPts(H, 'wind_gusts_10m'), secondary: true, smooth: 'soft' },
     ],
     fmt: v => fmtNum(v, 0), directLabels: 'peak', arrows, tipTime: p => fmtDayTime(p.t),
     tipNote: (s, p) => (s.name === 'Wind' ? ` · ${beaufort(p.v)} Bft · ${compass(p.row.wind_direction_10m)}` : ''),
     tipExtra: t => { const r = state.ens && state.ens.bands.wind_speed_10m.find(q => Math.abs(q.t.getTime() - t) < HOUR / 2); return r ? `onzekerheid ${fmtNum(r.lo, 0)} tot ${fmtNum(r.hi, 0)} km/u` : null; },
-    onScrub: p => { if (p) setTree(tree, p.v, p.row.wind_direction_10m, fmtDayTime(p.t)); else treeNow(); },
+    onScrub: p => { if (p) { const iv = H.interval.find(q => q.t.getTime() === p.t.getTime()); setTree(tree, p.v, p.row.wind_direction_10m, fmtDayTime(p.t), iv ? iv.precipitation : null); } else treeNow(); },
     aria: 'Windsnelheid en windstoten per uur volgens HARMONIE',
   });
   // the tree under the arrows: what this wind does to a tree, for now or for the hour under your finger
   const tree = treeView();
-  const treeNow = () => (o && o.wind != null ? setTree(tree, o.wind, o.dir, `Nu, gemeten ${fmtTime(o.time)}`) : setTree(tree, r0.wind_speed_10m, r0.wind_direction_10m, `Nu, verwacht`));
+  const rainNow = state.nowcast && state.nowcast.length ? state.nowcast[0].v : (H.interval[0] ? H.interval[0].precipitation : null);
+  const treeNow = () => (o && o.wind != null ? setTree(tree, o.wind, o.dir, `Nu, gemeten ${fmtTime(o.time)}`, rainNow) : setTree(tree, r0.wind_speed_10m, r0.wind_direction_10m, `Nu, verwacht`, rainNow));
   treeNow();
   k1.body.after(tree);
   legend(k1.el, [{ name: 'Windsnelheid', color: 'var(--s1)' }, { name: 'Windstoten', color: 'var(--s1)', dashed: true }, ...ensLegend(), { name: 'Pijl: richting waarheen de wind waait, elke 3 u', color: 'var(--label-3)' }]);
@@ -1578,7 +1633,7 @@ $('content').addEventListener('wheel', e => {
 /* ======================================================================
    6. Self-tests (open with ?test=1)
    ====================================================================== */
-const api = { raintextToMmh, parseRaintext, deriveCloudTotal, beaufort, compass, cloudWord, niceScale, parseForecast, parseEnsemble, parseObs, haversineKm, monotonePath, quantile, tickStepHours, compareRain, drawChart, tempColor, weatherIcon, hourIcons, treeView, setTree, makeTree, windTree, BEAUFORT, spanFor, maxHorizonHours, sunAltitude, solarEvents, skyColor, sunPhase, sunGlyph, sunWeatherKind, weatherAt, MODELS, state };
+const api = { raintextToMmh, parseRaintext, deriveCloudTotal, beaufort, compass, cloudWord, niceScale, parseForecast, parseEnsemble, parseObs, haversineKm, monotonePath, quantile, tickStepHours, compareRain, drawChart, tempColor, weatherIcon, hourIcons, treeView, setTree, makeTree, windTree, catmullRomPath, setWindField, makeWindField, BEAUFORT, spanFor, maxHorizonHours, sunAltitude, solarEvents, skyColor, sunPhase, sunGlyph, sunWeatherKind, weatherAt, MODELS, state };
 window.Regen = api;
 
 function runTests() {
@@ -1818,6 +1873,20 @@ function runTests() {
       const ic = hourIcons(state.forecast.models.harmonie);
       eq(ic[2].kind, 'rain', 'uur 22–23 regen'); ok(ic[0].night, '20:30 in oktober is nacht'); eq(ic[0].kind, 'partly', '40% bewolking = half bewolkt');
     } finally { state.forecast = saved; }
+  });
+  test('zachte curve: Catmull-Rom gaat door alle punten en geeft een bezierpad', () => {
+    const pts = [{ x: 0, y: 10 }, { x: 10, y: 20 }, { x: 20, y: 5 }, { x: 30, y: 15 }];
+    const d = catmullRomPath(pts, 0.5);
+    ok(d.startsWith('M0,10') && d.split(' C').length === 4, 'drie segmenten'); ok(d.endsWith('30.00,15.00'), 'eindigt op het laatste punt');
+    eq(catmullRomPath([{ x: 3, y: 4 }]), 'M3,4');
+  });
+  test('boom: regen zet druppels aan, windveld draait met de wind, windstil blijft licht bewegen', () => {
+    const el = treeView();
+    setTree(el, 20, 270, 'x', 0.6); ok(el.querySelector('.treeg').classList.contains('raining'), 'regen'); ok(el.querySelector('.tree-caption').textContent.includes('mm'), 'mm in bijschrift');
+    setTree(el, 20, 270, 'x', 0); ok(!el.querySelector('.treeg').classList.contains('raining'), 'droog');
+    const f = el.querySelector('.windfield'); setWindField(f, 30, 270); ok(f.style.getPropertyValue('--wangle').startsWith('-0') || f.style.getPropertyValue('--wangle').startsWith('0'), 'westenwind: streken naar rechts, kreeg ' + f.style.getPropertyValue('--wangle'));
+    setWindField(f, 30, 90); ok(parseFloat(f.style.getPropertyValue('--wangle')) > 150, 'oostenwind: streken naar links');
+    setTree(el, 0, 0, 'x'); eq(el.querySelector('.treeg').style.getPropertyValue('--amp'), '0.5deg', 'minimale beweging bij windstil');
   });
   test('boom: Beaufort stuurt zwaai, scheefstand en richting; vanaf 5 Bft vliegen bladeren', () => {
     const el = treeView();

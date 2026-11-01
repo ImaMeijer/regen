@@ -354,30 +354,40 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 
 /* ---------- the tree ---------- */
 .tree { display: flex; align-items: center; gap: 12px; margin: 6px 0 2px; }
-.tree svg { width: 132px; height: 145px; flex: none; overflow: visible; }
-.tree .ground, .chart .mtree .ground { stroke: var(--separator); stroke-width: 1.5; stroke-linecap: round; }
-.treeg .trunk { fill: none; stroke: #2f6b22; stroke-width: 7; stroke-linecap: round; }
-.treeg .trunk.thin { stroke-width: 4; }
-.treeg .bough { fill: none; stroke: #2f6b22; stroke-width: 2.6; stroke-linecap: round; }
-.treeg .leaf { fill: #7cc142; }
-.treeg .leaf.alt { fill: #a4d65e; }
-.treeg .flyer { fill: #7cc142; opacity: 0; } .treeg .flyer.alt { fill: #a4d65e; }
+.tree svg { width: 150px; height: 150px; flex: none; overflow: hidden; border-radius: 12px; }
+.tree .ground { stroke: var(--separator); stroke-width: 1.5; stroke-linecap: round; }
+.treeg .trunk { fill: none; stroke: #9a6a3a; stroke-width: 7; stroke-linecap: round; }
+.treeg .trunk.thin { stroke-width: 4.2; }
+.treeg .trunk.edge { stroke: #5a3a1a; stroke-width: 9.4; } .treeg .trunk.thin.edge { stroke-width: 6.4; }
+.treeg .bough { fill: none; stroke: #9a6a3a; stroke-width: 2.8; stroke-linecap: round; }
+.treeg .bough.edge { stroke: #5a3a1a; stroke-width: 4.6; }
+.treeg .leaf .blade { fill: #86d24a; stroke: #2f6b22; stroke-width: 0.9; stroke-linejoin: round; }
+.treeg .leaf.alt .blade { fill: #4fae3b; }
+.treeg .leaf .vein { fill: none; stroke: #2f6b22; stroke-width: 0.7; stroke-linecap: round; opacity: 0.8; }
+.treeg .flyer { opacity: 0; transform-box: fill-box; }
+.treeg .flyer .blade { fill: #86d24a; stroke: #2f6b22; stroke-width: 0.9; } .treeg .flyer.alt .blade { fill: #4fae3b; }
 .treeg .tree-sway { transform-box: view-box; transform-origin: 50px 106px; animation: tree-sway var(--period, 3s) ease-in-out infinite alternate; }
 .treeg .branch { transform-box: view-box; animation: branch-sway var(--period, 3s) ease-in-out infinite alternate; }
-.treeg .leaf { transform-box: view-box; animation: leaf-flutter calc(var(--period, 3s) * 0.45) ease-in-out infinite alternate; }
-.treeg.still .tree-sway, .treeg.still .branch, .treeg.still .leaf { animation: none; }
+.treeg .leaf { transform-box: fill-box; transform-origin: 0% 55%; animation: leaf-flutter calc(var(--period, 3s) * 0.45) ease-in-out infinite alternate; }
 .treeg.flying .flyer { animation: leaf-fly calc(var(--period, 3s) * 1.6) linear infinite; }
-.treeg .chimney { fill: var(--label-3); }
-.treeg .puff { fill: var(--label-3); opacity: 0.35; animation: smoke-puff calc(var(--period, 3s) * 0.8) ease-in-out infinite alternate; }
-.chart .mtree .treeg .trunk { stroke-width: 9; } .chart .mtree .treeg .bough { stroke-width: 3.4; }
+.treeg .raindrops { display: none; }
+.treeg.raining .raindrops { display: block; }
+.treeg .raindrops line { stroke: var(--s1); stroke-width: 1.3; stroke-linecap: round; opacity: 0.8; animation: rain-fall calc(var(--period, 3s) * 0.6) linear infinite; }
+.chart .mtree .treeg .trunk { stroke-width: 9; } .chart .mtree .treeg .trunk.edge { stroke-width: 11.5; }
+.chart .mtree .treeg .bough { stroke-width: 3.6; } .chart .mtree .treeg .bough.edge { stroke-width: 5.6; }
+.chart .mtree .treeg .leaf .blade { stroke-width: 1.2; }
+.windfield { transform-box: view-box; transform-origin: 50px 58px; transform: rotate(var(--wangle, 0deg)); }
+.windfield line { stroke: var(--label-2); stroke-width: 1.4; stroke-linecap: round; opacity: var(--wop, 0.2); transform-box: view-box; animation: wind-streak var(--wperiod, 4s) linear infinite; }
+.windfield.calm line { opacity: 0.05; }
 .tree-text { font-size: 13px; color: var(--label-2); line-height: 1.35; }
 .tree-caption { font-weight: 600; color: var(--label); }
 @keyframes tree-sway { from { transform: rotate(calc(var(--lean, 0deg) - var(--amp, 0deg))); } to { transform: rotate(calc(var(--lean, 0deg) + var(--amp, 0deg))); } }
 @keyframes branch-sway { from { transform: rotate(calc(-0.6 * var(--amp, 0deg))); } to { transform: rotate(calc(0.6 * var(--amp, 0deg))); } }
 @keyframes leaf-flutter { from { transform: rotate(calc(-1.5 * var(--amp, 0deg))); } to { transform: rotate(calc(1.5 * var(--amp, 0deg))); } }
 @keyframes leaf-fly { 0% { opacity: 0; transform: translate(0, 0) rotate(0deg); } 12% { opacity: 0.9; } 100% { opacity: 0; transform: translate(calc(var(--dx, 1) * 95px), -18px) rotate(260deg); } }
-@keyframes smoke-puff { from { transform: translateY(0); opacity: 0.4; } to { transform: translateY(-2.5px); opacity: 0.2; } }
-@media (prefers-reduced-motion: reduce) { .treeg * { animation: none !important; } .treeg .tree-sway { transform: rotate(var(--lean, 0deg)); } }
+@keyframes rain-fall { from { transform: translate(0, -12px); opacity: 0; } 20% { opacity: 0.8; } to { transform: translate(var(--rainslant, 0px), 70px); opacity: 0; } }
+@keyframes wind-streak { from { transform: translateX(0) scaleX(var(--wlen, 1)); } to { transform: translateX(240px) scaleX(var(--wlen, 1)); } }
+@media (prefers-reduced-motion: reduce) { .treeg *, .windfield line { animation: none !important; } .treeg .tree-sway { transform: rotate(var(--lean, 0deg)); } }
 
 /* ---------- info page ---------- */
 .info-btn {
