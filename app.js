@@ -381,7 +381,8 @@ function drawChart(host, spec) {
   const compact = !!spec.compact; // sub-chart under a main chart: same x-axis, no day strip, no x labels
   const arrowRow = spec.arrows ? 22 : 0;
   const iconRow = spec.icons && !compact ? 24 : 0; // row of weather icons between the day strip and the plot
-  const m = { top: (compact ? 10 : (hasDays ? 42 : 26)) + iconRow, right: 10, bottom: compact ? 8 : 24 + arrowRow, left: 34 };
+  const treeRow = spec.trees && !compact ? 34 : 0; // row of little wind trees under the x labels
+  const m = { top: (compact ? 10 : (hasDays ? 42 : 26)) + iconRow, right: 10, bottom: compact ? 8 : 24 + arrowRow + treeRow, left: 34 };
   const strip = m.top - iconRow; // where the day strip sits (above the icon row)
   const pw = W - m.left - m.right, ph = H - m.top - m.bottom;
   const t0 = spec.tMin.getTime();
@@ -504,14 +505,31 @@ function drawChart(host, spec) {
   }
 
   // hourly weather icons (overview): one per hour where there is room, else every 2nd/3rd hour
+  const pxPerHour = pw / ((t1 - t0) / HOUR);
+  const iconStep = Math.max(1, Math.ceil(18 / pxPerHour));
   if (spec.icons && !compact) {
-    const pxPerHour = pw / ((t1 - t0) / HOUR);
-    const step = Math.max(1, Math.ceil(18 / pxPerHour));
     spec.icons.forEach((ic, i) => {
-      if (i % step) return;
+      if (i % iconStep) return;
       const px = x(ic.t.getTime());
       if (px < m.left + 6 || px > W - m.right - 6) return;
       svg.appendChild(weatherIcon(px, m.top - 12, ic.kind, ic.night));
+    });
+  }
+  // little trees under the x labels: one per icon when ≥ 26 px apart, else one per two icons
+  if (spec.trees && !compact) {
+    const step = iconStep * (iconStep * pxPerHour >= 26 ? 1 : 2);
+    const yRow = m.top + ph + 24 + arrowRow;
+    spec.trees.forEach((tr, i) => {
+      if (i % step || tr.kmh == null) return;
+      const px = x(tr.t.getTime());
+      if (px < m.left + 8 || px > W - m.right - 8) return;
+      const s = 0.27;
+      const g = svgEl('g', { class: 'mtree', transform: `translate(${(px - 50 * s).toFixed(1)},${yRow.toFixed(1)})` });
+      const t = makeTree(s, false);
+      windTree(t, tr.kmh, tr.dir);
+      t.appendChild(svgEl('title', {}, `${fmtTime(tr.t)} · ${fmtNum(tr.kmh, 0)} km/u · ${beaufort(tr.kmh)} Bft uit ${compass(tr.dir)}`));
+      g.appendChild(t);
+      svg.appendChild(g);
     });
   }
 
@@ -1189,10 +1207,11 @@ function renderOverview(c) {
   const icons = hourIcons(H);
   const pts = H.instant.map(r => ({ t: r.t, tEnd: new Date(r.t.getTime() + HOUR), v: r.temperature_2m, row: r }));
   const iconFor = p => icons.find(i => i.hour.getTime() === p.t.getTime());
+  const trees = H.instant.map(r => ({ t: new Date(r.t.getTime() + HOUR / 2), kmh: r.wind_speed_10m, dir: r.wind_direction_10m }));
   drawChart(k.body, { sky: skyOf(), group: 'overview',
-    ...spanFor([H]), unit: '°C', unitTip: '°C', ticks: 'days', now, yFixed: niceScale(Math.min(...pts.map(p => p.v)) - 6, Math.max(...pts.map(p => p.v)) + 1, { minSpan: 10, targetTicks: 4 }), icons,
-    series: [{ kind: 'bar', name: 'Temperatuur', color: 'var(--s1)', colorAt: tempColor, points: pts }],
-    fmt: v => fmtNum(v, 0), directLabels: 'minmax', tipTime: p => `${fmtWd(p.t)} ${fmtHourRange(p.t)}`,
+    ...spanFor([H]), unit: '°C', unitTip: '°C', ticks: 'days', now, yOpts: { minSpan: 8, targetTicks: 4 }, icons, trees,
+    series: [{ kind: 'line', name: 'Temperatuur', color: 'var(--s2)', colorAt: tempColor, points: pts.map(p => ({ t: p.t, v: p.v, row: p.row })), smooth: true, area: true, areaOpacity: 0.16 }],
+    fmt: v => fmtNum(v, 0), directLabels: 'minmax', tipTime: p => fmtDayTime(p.t),
     tipNote: (s, p) => { const ic = iconFor(p); const iv = H.interval.find(q => q.t.getTime() === p.t.getTime()); return (ic ? ` · ${ic.kind === 'clear' && ic.night ? 'helder' : ICON_WORDS[ic.kind]}` : '') + (iv && iv.precipitation >= 0.1 ? ` · ${fmtMm(iv.precipitation)} mm` : ''); },
     aria: 'Temperatuur per uur met weericoontjes',
   });
@@ -1204,7 +1223,7 @@ function renderOverview(c) {
     series: [{ kind: 'bar', name: 'Neerslag', color: 'var(--s1)', points: rain }], fmt: fmtMm, tipTime: p => `${fmtWd(p.t)} ${fmtHourRange(p.t)}`,
     aria: 'Neerslag per uur',
   });
-  legend(k.el, [{ name: 'Temperatuur', color: 'var(--s2)', rect: true, note: 'blauw = koud, oranje = warm' }, { name: 'Neerslag per uur', color: 'var(--s1)', rect: true }, { name: 'Icoontje = weerbeeld van dat uur', color: 'var(--label-3)', rect: true }]);
+  legend(k.el, [{ name: 'Temperatuur', color: 'var(--s2)', note: 'blauw = koud, oranje = warm' }, { name: 'Neerslag per uur', color: 'var(--s1)', rect: true }, { name: 'Icoontje = weerbeeld, boompje = wind van dat uur', color: 'var(--label-3)', rect: true }]);
   k.tableHost.appendChild(dataTable(H.instant, [{ label: 'Uur', get: p => fmtDayTime(p.t) }, { label: '°C', num: true, get: p => fmtNum(p.temperature_2m, 0) }, { label: 'Weer', get: p => { const ic = icons.find(i => i.hour.getTime() === p.t.getTime()); return ic ? (ic.kind === 'clear' && ic.night ? 'helder' : ICON_WORDS[ic.kind]) : ''; } }, { label: 'mm', num: true, get: p => { const iv = H.interval.find(q => q.t.getTime() === p.t.getTime()); return iv ? fmtNum(iv.precipitation, 1) : '–'; } }]));
 }
 
@@ -1229,24 +1248,76 @@ const TREE = {
   lean:   [0, 0, 1, 2, 4, 6, 9, 12, 16, 20, 25, 30, 35],       // scheefstand in graden
   period: [4, 3.6, 3.2, 2.8, 2.4, 2, 1.7, 1.4, 1.2, 1, 0.9, 0.8, 0.7], // zwaaiperiode in seconden
 };
+/* One tree model (viewBox 0 0 100 110, foot at 50,106): curved trunk, five branches, lance-shaped leaves in two
+   greens. Used large on the wind page and small in the overview row. Wind is applied with CSS variables. */
+const TREE_BRANCHES = [
+  { d: 'M50 74 C42 68 33 64 24 60', end: [24, 60], ang: -22 },
+  { d: 'M52 60 C46 52 41 46 36 38', end: [36, 38], ang: -55 },
+  { d: 'M55 58 C63 54 71 52 80 46', end: [80, 46], ang: 22 },
+  { d: 'M57 44 C60 34 62 26 64 18', end: [64, 18], ang: -70 },
+  { d: 'M57 46 C66 40 74 36 82 30', end: [82, 30], ang: 32 },
+];
+function makeTree(scale = 1, withSmoke = false) {
+  const g = svgEl('g', { class: 'treeg' });
+  const sway = svgEl('g', { class: 'tree-sway' }); // rotates around the foot: lean + sway
+  sway.appendChild(svgEl('path', { class: 'trunk', d: 'M50 106 C51 92 46 80 50 66 C53 56 54 48 56 40' }));
+  sway.appendChild(svgEl('path', { class: 'trunk thin', d: 'M52 66 C55 56 56 46 58 34' }));
+  TREE_BRANCHES.forEach((b, i) => {
+    const [, ox, oy] = b.d.match(/M(\d+) (\d+)/);
+    const br = svgEl('g', { class: 'branch', style: `transform-origin:${ox}px ${oy}px;animation-delay:${(-i * 0.23).toFixed(2)}s` });
+    br.appendChild(svgEl('path', { class: 'bough', d: b.d }));
+    // leaves fanned out around the branch tip, plus two halfway along the branch, alternating the two greens
+    const [ex, ey] = b.end;
+    const leaf = (lx, ly, a, k) => br.appendChild(svgEl('ellipse', { class: `leaf ${k % 2 ? 'alt' : ''}`, cx: lx.toFixed(1), cy: ly.toFixed(1), rx: 6.2, ry: 3, transform: `rotate(${a.toFixed(0)} ${lx.toFixed(1)} ${ly.toFixed(1)})`, style: `transform-origin:${lx.toFixed(1)}px ${ly.toFixed(1)}px;animation-delay:${(-(i * 6 + k) * 0.17).toFixed(2)}s` }));
+    for (let k = 0; k < 4; k++) {
+      const a = b.ang + (k - 1.5) * 38;
+      leaf(ex + Math.cos(rad(a)) * 6, ey + Math.sin(rad(a)) * 6, a, k);
+    }
+    const nums = b.d.match(/-?\d+(\.\d+)?/g).map(Number); // M x0 y0 C x1 y1 x2 y2 x3 y3
+    const at = (tt) => { const u = 1 - tt; return [0, 1].map(j => u * u * u * nums[j] + 3 * u * u * tt * nums[2 + j] + 3 * u * tt * tt * nums[4 + j] + tt * tt * tt * nums[6 + j]); };
+    const [mx, my] = at(0.55);
+    leaf(mx + Math.cos(rad(b.ang - 90)) * 5, my + Math.sin(rad(b.ang - 90)) * 5, b.ang - 60, 4);
+    leaf(mx + Math.cos(rad(b.ang + 90)) * 5, my + Math.sin(rad(b.ang + 90)) * 5, b.ang + 60, 5);
+    sway.appendChild(br);
+  });
+  g.appendChild(sway);
+  const flyers = svgEl('g', { class: 'flyers' });
+  for (let i = 0; i < 5; i++) flyers.appendChild(svgEl('ellipse', { class: `flyer ${i % 2 ? 'alt' : ''}`, cx: 50 + (i - 2) * 7, cy: 40 + (i % 3) * 9, rx: 5, ry: 2.4, style: `animation-delay:${(-i * 0.41).toFixed(2)}s` }));
+  g.appendChild(flyers);
+  if (withSmoke) {
+    const smoke = svgEl('g', { class: 'smoke' });
+    smoke.appendChild(svgEl('rect', { class: 'chimney', x: 10, y: 96, width: 6, height: 10, rx: 1 }));
+    for (let i = 0; i < 5; i++) smoke.appendChild(svgEl('circle', { class: 'puff', r: 2 + i * 0.7, style: `animation-delay:${(-i * 0.5).toFixed(2)}s` }));
+    g.appendChild(smoke);
+  }
+  if (scale !== 1) g.setAttribute('transform', `scale(${scale})`);
+  return g;
+}
+/* apply a wind to a tree group: lean/sway from Beaufort, direction = where the wind blows to */
+function windTree(g, kmh, dirDeg) {
+  const b = beaufort(kmh || 0);
+  const dx = Math.sin(rad((dirDeg == null ? 270 : dirDeg) + 180)); // +x = naar rechts
+  const sign = Math.abs(dx) < 0.3 ? (dx < 0 ? -0.3 : 0.3) : dx;
+  g.style.setProperty('--amp', `${TREE.amp[b]}deg`);
+  g.style.setProperty('--lean', `${(TREE.lean[b] * sign).toFixed(1)}deg`);
+  g.style.setProperty('--period', `${TREE.period[b]}s`);
+  g.style.setProperty('--dx', sign.toFixed(2));
+  g.classList.toggle('flying', b >= 5);
+  g.classList.toggle('still', b === 0);
+  g.dataset.bft = b;
+  // smoke: straight up when calm, bending and flattening with the wind
+  g.querySelectorAll('.puff').forEach((p, i) => {
+    const bend = sign * Math.min(40, i * i * (0.3 + 1.1 * b));
+    const rise = Math.max(2.5, 8 - 0.7 * b) * i;
+    p.setAttribute('cx', (13 + bend).toFixed(1)); p.setAttribute('cy', (94 - rise).toFixed(1));
+  });
+  return b;
+}
 function treeView() {
   const wrap = h('div', 'tree');
-  const svg = svgEl('svg', { viewBox: '0 0 160 120', 'aria-hidden': 'true' });
-  svg.appendChild(svgEl('line', { class: 'ground', x1: 20, x2: 140, y1: 108, y2: 108 }));
-  const trunk = svgEl('g', { class: 'trunk' });
-  trunk.appendChild(svgEl('path', { class: 'bark', d: 'M76 108 L78 72 Q80 60 82 72 L84 108 Z' }));
-  const canopy = svgEl('g', { class: 'canopy' });
-  for (const [cx, cy, r] of [[80, 50, 22], [62, 62, 16], [98, 62, 16], [70, 42, 13], [92, 42, 13]]) canopy.appendChild(svgEl('circle', { class: 'blob', cx, cy, r }));
-  // individual leaves that flutter
-  for (let i = 0; i < 14; i++) {
-    const a = (i / 14) * Math.PI * 2, rr = 10 + (i % 3) * 5;
-    canopy.appendChild(svgEl('ellipse', { class: 'leaf', cx: (80 + Math.cos(a) * rr).toFixed(1), cy: (52 + Math.sin(a) * rr * 0.8).toFixed(1), rx: 2.6, ry: 1.4, transform: `rotate(${(i * 37) % 180} ${(80 + Math.cos(a) * rr).toFixed(1)} ${(52 + Math.sin(a) * rr * 0.8).toFixed(1)})` }));
-  }
-  trunk.appendChild(canopy);
-  svg.appendChild(trunk);
-  const flyers = svgEl('g', { class: 'flyers' });
-  for (let i = 0; i < 5; i++) flyers.appendChild(svgEl('ellipse', { class: 'flyer', cx: 80 + (i - 2) * 6, cy: 46 + (i % 2) * 10, rx: 2.6, ry: 1.4, style: `animation-delay:${(-i * 0.37).toFixed(2)}s` }));
-  svg.appendChild(flyers);
+  const svg = svgEl('svg', { viewBox: '0 0 100 110', 'aria-hidden': 'true' });
+  svg.appendChild(svgEl('line', { class: 'ground', x1: 6, x2: 94, y1: 106, y2: 106 }));
+  svg.appendChild(makeTree(1, true));
   wrap.appendChild(svg);
   const txt = h('div', 'tree-text');
   txt.appendChild(h('div', 'tree-caption'));
@@ -1255,15 +1326,10 @@ function treeView() {
   return wrap;
 }
 function setTree(el, kmh, dirDeg, label) {
-  const b = beaufort(kmh || 0);
-  const dx = Math.sin(rad((dirDeg == null ? 270 : dirDeg) + 180)); // wind blows TO dir+180; +x = naar rechts
-  const sign = Math.abs(dx) < 0.3 ? (dx < 0 ? -0.3 : 0.3) : dx;
-  el.style.setProperty('--amp', `${TREE.amp[b]}deg`);
-  el.style.setProperty('--lean', `${(TREE.lean[b] * sign).toFixed(1)}deg`);
-  el.style.setProperty('--period', `${TREE.period[b]}s`);
-  el.style.setProperty('--dx', sign.toFixed(2));
-  el.classList.toggle('flying', b >= 5);
-  el.classList.toggle('still', b === 0);
+  const g = el.querySelector('.treeg');
+  const b = windTree(g, kmh, dirDeg);
+  for (const k of ['--amp', '--lean', '--period', '--dx']) el.style.setProperty(k, g.style.getPropertyValue(k));
+  el.classList.toggle('flying', b >= 5); el.classList.toggle('still', b === 0);
   el.dataset.bft = b;
   el.querySelector('.tree-caption').textContent = `${label} · ${fmtNum(kmh || 0, 0)} km/u · ${b} Bft`;
   el.querySelector('.tree-desc').textContent = `${BEAUFORT[b][0]}: ${BEAUFORT[b][1]}`;
@@ -1512,7 +1578,7 @@ $('content').addEventListener('wheel', e => {
 /* ======================================================================
    6. Self-tests (open with ?test=1)
    ====================================================================== */
-const api = { raintextToMmh, parseRaintext, deriveCloudTotal, beaufort, compass, cloudWord, niceScale, parseForecast, parseEnsemble, parseObs, haversineKm, monotonePath, quantile, tickStepHours, compareRain, drawChart, tempColor, weatherIcon, hourIcons, treeView, setTree, BEAUFORT, spanFor, maxHorizonHours, sunAltitude, solarEvents, skyColor, sunPhase, sunGlyph, sunWeatherKind, weatherAt, MODELS, state };
+const api = { raintextToMmh, parseRaintext, deriveCloudTotal, beaufort, compass, cloudWord, niceScale, parseForecast, parseEnsemble, parseObs, haversineKm, monotonePath, quantile, tickStepHours, compareRain, drawChart, tempColor, weatherIcon, hourIcons, treeView, setTree, makeTree, windTree, BEAUFORT, spanFor, maxHorizonHours, sunAltitude, solarEvents, skyColor, sunPhase, sunGlyph, sunWeatherKind, weatherAt, MODELS, state };
 window.Regen = api;
 
 function runTests() {

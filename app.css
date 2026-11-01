@@ -353,25 +353,31 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .chart .wicon .drops line { stroke: var(--s1); stroke-width: 1.2; stroke-linecap: round; }
 
 /* ---------- the tree ---------- */
-.tree { display: flex; align-items: center; gap: 10px; margin: 6px 0 2px; }
-.tree svg { width: 128px; height: 96px; flex: none; overflow: visible; }
-.tree .ground { stroke: var(--separator); stroke-width: 1.5; stroke-linecap: round; }
-.tree .bark { fill: #8a6a4b; }
-.tree .blob { fill: #4f9a4a; opacity: 0.9; }
-.tree .leaf { fill: #7fc46a; }
-.tree .flyer { fill: #c9a24f; opacity: 0; }
-.tree .trunk { transform-origin: 80px 108px; animation: tree-sway var(--period, 3s) ease-in-out infinite alternate; }
-.tree .canopy { transform-origin: 80px 72px; animation: tree-sway var(--period, 3s) ease-in-out infinite alternate; animation-delay: calc(var(--period, 3s) * -0.3); }
-.tree .leaf { transform-box: fill-box; transform-origin: center; animation: leaf-flutter calc(var(--period, 3s) * 0.5) ease-in-out infinite alternate; }
-.tree .leaf:nth-child(3n) { animation-delay: -0.4s; } .tree .leaf:nth-child(3n+1) { animation-delay: -0.9s; }
-.tree.still .trunk, .tree.still .canopy, .tree.still .leaf { animation: none; }
-.tree.flying .flyer { animation: leaf-fly calc(var(--period, 3s) * 1.6) linear infinite; }
+.tree { display: flex; align-items: center; gap: 12px; margin: 6px 0 2px; }
+.tree svg { width: 132px; height: 145px; flex: none; overflow: visible; }
+.tree .ground, .chart .mtree .ground { stroke: var(--separator); stroke-width: 1.5; stroke-linecap: round; }
+.treeg .trunk { fill: none; stroke: #2f6b22; stroke-width: 7; stroke-linecap: round; }
+.treeg .trunk.thin { stroke-width: 4; }
+.treeg .bough { fill: none; stroke: #2f6b22; stroke-width: 2.6; stroke-linecap: round; }
+.treeg .leaf { fill: #7cc142; }
+.treeg .leaf.alt { fill: #a4d65e; }
+.treeg .flyer { fill: #7cc142; opacity: 0; } .treeg .flyer.alt { fill: #a4d65e; }
+.treeg .tree-sway { transform-box: view-box; transform-origin: 50px 106px; animation: tree-sway var(--period, 3s) ease-in-out infinite alternate; }
+.treeg .branch { transform-box: view-box; animation: branch-sway var(--period, 3s) ease-in-out infinite alternate; }
+.treeg .leaf { transform-box: view-box; animation: leaf-flutter calc(var(--period, 3s) * 0.45) ease-in-out infinite alternate; }
+.treeg.still .tree-sway, .treeg.still .branch, .treeg.still .leaf { animation: none; }
+.treeg.flying .flyer { animation: leaf-fly calc(var(--period, 3s) * 1.6) linear infinite; }
+.treeg .chimney { fill: var(--label-3); }
+.treeg .puff { fill: var(--label-3); opacity: 0.35; animation: smoke-puff calc(var(--period, 3s) * 0.8) ease-in-out infinite alternate; }
+.chart .mtree .treeg .trunk { stroke-width: 9; } .chart .mtree .treeg .bough { stroke-width: 3.4; }
 .tree-text { font-size: 13px; color: var(--label-2); line-height: 1.35; }
 .tree-caption { font-weight: 600; color: var(--label); }
 @keyframes tree-sway { from { transform: rotate(calc(var(--lean, 0deg) - var(--amp, 0deg))); } to { transform: rotate(calc(var(--lean, 0deg) + var(--amp, 0deg))); } }
-@keyframes leaf-flutter { from { transform: rotate(calc(-2 * var(--amp, 0deg))); } to { transform: rotate(calc(2 * var(--amp, 0deg))); } }
+@keyframes branch-sway { from { transform: rotate(calc(-0.6 * var(--amp, 0deg))); } to { transform: rotate(calc(0.6 * var(--amp, 0deg))); } }
+@keyframes leaf-flutter { from { transform: rotate(calc(-1.5 * var(--amp, 0deg))); } to { transform: rotate(calc(1.5 * var(--amp, 0deg))); } }
 @keyframes leaf-fly { 0% { opacity: 0; transform: translate(0, 0) rotate(0deg); } 12% { opacity: 0.9; } 100% { opacity: 0; transform: translate(calc(var(--dx, 1) * 95px), -18px) rotate(260deg); } }
-@media (prefers-reduced-motion: reduce) { .tree * { animation: none !important; } .tree .trunk { transform: rotate(var(--lean, 0deg)); } }
+@keyframes smoke-puff { from { transform: translateY(0); opacity: 0.4; } to { transform: translateY(-2.5px); opacity: 0.2; } }
+@media (prefers-reduced-motion: reduce) { .treeg * { animation: none !important; } .treeg .tree-sway { transform: rotate(var(--lean, 0deg)); } }
 
 /* ---------- info page ---------- */
 .info-btn {

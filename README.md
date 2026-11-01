@@ -100,3 +100,9 @@ Knijpen tekent de grafieken in place opnieuw (de bezig-aanraking blijft op hetze
 - **Info-pagina** als verborgen tab (knop onderaan elke pagina), met alles over werking, bronnen, leesinstructie, de Beaufort-tabel en licenties. Modelnamen zijn uit de gewone schermen verdwenen: daar staat "verwacht", "gemeten", "kans op regen" en "onzekerheid".
 - **Schuiven met de vinger**: de stippellijn volgt je vinger, met de tijd eronder; botsende tijdlabels verdwijnen; gekoppelde grafieken in dezelfde kaart bewegen mee; na loslaten springt de lijn na 1,8 s terug naar nu. Oorzaak van de oude bug: de knijp-handler nam elke aanraking in beslag (pointer capture), ook met één vinger; nu pas bij de tweede vinger.
 - **Maximaal 48 uur** vooruit; presets 6 / 12 / 24 / 48 u; de tegel "Tot horizon" is weg.
+
+## Versie 8: temperatuurlijn, boompjesrij, nieuwe boom met rook
+
+- **Overzicht:** temperatuur als vloeiende lijn met vlak, gekleurd langs de lijn (blauw → amber → rood). Tussen de temperatuurgrafiek en de neerslag een rij boompjes die de wind van dat uur tonen: één per weericoontje als er minstens 26 px tussen zit, anders één per twee icoontjes.
+- **Boommodel** (één SVG-model, groot op de windpagina en klein in de rij): gebogen stam, vijf takken, lancetvormige blaadjes in twee groentinten aan de toppen en halverwege de takken. Stam en takken zwaaien met amplitude en tempo per Beaufort, de boom leunt naar de kant waarheen de wind waait, en vanaf 5 Bft vliegen blaadjes weg.
+- **Rook** op de windpagina: een schoorsteentje met pluim die bij windstilte recht omhoog gaat en met meer wind steeds platter wegwaait in de windrichting, naar de KNMI-omschrijving voor 0 en 1 Bft.
