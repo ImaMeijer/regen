@@ -1216,9 +1216,14 @@ function renderOverview(c) {
   const today = H.instant.filter(p => p.t.getDate() === r0.t.getDate());
   const mx = Math.max(...today.map(p => p.temperature_2m)), mn = Math.min(...today.map(p => p.temperature_2m));
   const temp = o && o.temp != null ? o.temp : r0.temperature_2m;
-  heroBlock(c, '<svg class="ico-big" viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 10h.5a4 4 0 0 1 0 8H7z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
+  heroBlock(c, '',
     o && o.temp != null ? `Gemeten ${fmtTime(o.time)} · ${o.station}` : `Nu · ${fmtTime(r0.t)} · verwacht`,
     `${fmtNum(temp, 0)}° · ${word0}`, `voelt als ${fmtNum(o && o.feel != null ? o.feel : r0.apparent_temperature, 0)}° · vandaag ${fmtNum(mn, 0)}° tot ${fmtNum(mx, 0)}°`);
+  // the tile's icon is the weather of this moment, drawn with the same icons as the hourly row below
+  const heroEl = c.lastElementChild;
+  const heroIcon = svgEl('svg', { class: 'ico-big wicon-big', viewBox: '-10 -10 20 20', 'aria-hidden': 'true' });
+  heroIcon.appendChild(weatherIcon(0, 0, kind0, night0));
+  heroEl.insertBefore(heroIcon, heroEl.firstChild);
 
   c.appendChild(horizonBar());
   const k = card(spanTitle(), []);

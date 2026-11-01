@@ -345,12 +345,13 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .chart.zoomable { touch-action: pan-y; }
 
 /* ---------- weather icons in the overview row ---------- */
-.chart .wicon .disc { fill: var(--sun); }
-.chart .wicon .sun-core line { stroke: var(--sun); stroke-width: 1.1; stroke-linecap: round; }
-.chart .wicon .moon { fill: var(--label-2); }
-.chart .wicon .cloud path { fill: var(--card); stroke: var(--label-3); stroke-width: 1; stroke-linejoin: round; }
-.chart .wicon.cloud .cloud path, .chart .wicon.rain .cloud path { fill: var(--cloud-lo); }
-.chart .wicon .drops line { stroke: var(--s1); stroke-width: 1.2; stroke-linecap: round; }
+.chart .wicon .disc, .wicon-big .wicon .disc { fill: var(--sun); }
+.chart .wicon .sun-core line, .wicon-big .wicon .sun-core line { stroke: var(--sun); stroke-width: 1.1; stroke-linecap: round; }
+.chart .wicon .moon, .wicon-big .wicon .moon { fill: var(--label-2); }
+.chart .wicon .cloud path, .wicon-big .wicon .cloud path { fill: var(--card); stroke: var(--label-3); stroke-width: 1; stroke-linejoin: round; }
+.chart .wicon.cloud .cloud path, .chart .wicon.rain .cloud path, .wicon-big .wicon.cloud .cloud path, .wicon-big .wicon.rain .cloud path { fill: var(--cloud-lo); }
+.chart .wicon .drops line, .wicon-big .wicon .drops line { stroke: var(--s1); stroke-width: 1.2; stroke-linecap: round; }
+.hero .wicon-big { width: 44px; height: 44px; overflow: visible; }
 
 /* ---------- the tree (seen from slightly above) ---------- */
 .tree { display: flex; align-items: center; gap: 12px; margin: 6px 0 2px; }

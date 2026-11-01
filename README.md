@@ -123,3 +123,7 @@ Knijpen tekent de grafieken in place opnieuw (de bezig-aanraking blijft op hetze
 ## Versie 11: boom van schuin boven
 
 De boom wordt nu van iets boven bekeken: een ronde kruin van zes uitwaaierende takken met blaadjes, een korte stam naar de stamvoet en een schaduw op de grond. Daarmee valt het kompas samen met het scherm: noord is omhoog, oost is rechts (noord-zuid iets verkort, factor 0,6). Wind schuift de kruin van de voet af in de richting waarheen hij waait; de stam volgt de kruin. De streken van het windveld stromen in dezelfde schermrichting zonder diepte-truc; regen is te zien als spattende druppels op de grond. Een kompasje rechtsboven markeert het noorden. Dezelfde scène staat verkleind onder de wolkjes in het overzicht.
+
+## Versie 12: icoontjes
+
+Het tab-icoontje van Overzicht gebruikt onderin hetzelfde wolkje als Bewolking, verkleind, zonder de uitstulping linksonder. De tegel bovenin het overzicht toont het weerbeeld van nu met dezelfde icoontjes als de uurrij (zon of maan, half bewolkt, bewolkt, regen).
