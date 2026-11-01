@@ -395,7 +395,7 @@ function drawChart(host, spec) {
   const compact = !!spec.compact; // sub-chart under a main chart: same x-axis, no day strip, no x labels
   const arrowRow = spec.arrows ? 22 : 0;
   const iconRow = spec.icons && !compact ? 24 : 0; // row of weather icons between the day strip and the plot
-  const treeRow = spec.trees && !compact ? 34 : 0; // row of little wind trees under the x labels
+  const treeRow = spec.trees && !compact ? 62 : 0; // row of little wind scenes under the x labels
   const m = { top: (compact ? 10 : (hasDays ? 42 : 26)) + iconRow, right: 10, bottom: compact ? 8 : 24 + arrowRow + treeRow, left: 34 };
   const strip = m.top - iconRow; // where the day strip sits (above the icon row)
   const pw = W - m.left - m.right, ph = H - m.top - m.bottom;
@@ -529,21 +529,27 @@ function drawChart(host, spec) {
       svg.appendChild(weatherIcon(px, m.top - 12, ic.kind, ic.night));
     });
   }
-  // little trees under the x labels, one under every weather icon (same hours), sized to the spacing
+  // little scenes under the x labels: the same tree + wind field + rain as on the wind page, on icon hours,
+  // as many as fit at ≥ 44 px apart (so one per two or three icons)
   if (spec.trees && !compact) {
-    const spacing = iconStep * pxPerHour;
-    const s = clamp(spacing / 95, 0.2, 0.3);
-    const yRow = m.top + ph + 24 + arrowRow + (0.3 - s) * 40;
+    let step = iconStep;
+    while (step * pxPerHour < 44) step += iconStep;
+    const box = clamp(step * pxPerHour - 4, 40, 56); // width of one scene in px
+    const s = box / 100;
+    const yRow = m.top + ph + 22 + arrowRow;
     spec.trees.forEach((tr, i) => {
-      if (i % iconStep || tr.kmh == null) return;
+      if (i % step || tr.kmh == null) return;
       const px = x(tr.t.getTime());
       if (px < m.left - 2 || px > W - m.right + 2) return;
-      const g = svgEl('g', { class: 'mtree', transform: `translate(${(px - 50 * s).toFixed(1)},${yRow.toFixed(1)})` });
-      const t = makeTree(s);
+      const scene = svgEl('svg', { class: 'mtree', x: (px - box / 2).toFixed(1), y: yRow.toFixed(1), width: box.toFixed(1), height: (110 * s).toFixed(1), viewBox: '0 0 100 110' });
+      const field = makeWindField();
+      setWindField(field, tr.kmh, tr.dir);
+      scene.appendChild(field);
+      const t = makeTree(1);
       windTree(t, tr.kmh, tr.dir, tr.rain);
       t.appendChild(svgEl('title', {}, `${fmtTime(tr.t)} · ${fmtNum(tr.kmh, 0)} km/u · ${beaufort(tr.kmh)} Bft uit ${compass(tr.dir)}${tr.rain >= 0.1 ? ` · ${fmtMm(tr.rain)} mm` : ''}`));
-      g.appendChild(t);
-      svg.appendChild(g);
+      scene.appendChild(t);
+      svg.appendChild(scene);
     });
   }
 
@@ -789,7 +795,7 @@ function card(title, metaNodes) {
   c.appendChild(head);
   const meta = h('p', 'meta');
   for (const n of metaNodes) meta.appendChild(typeof n === 'string' ? document.createTextNode(n) : n);
-  c.appendChild(meta);
+  if (metaNodes.length) c.appendChild(meta);
   const body = h('div', 'chart');
   c.appendChild(body);
   const tableHost = h('div'); tableHost.hidden = true; c.appendChild(tableHost);
@@ -1034,7 +1040,7 @@ function horizonBar() {
   lbl.appendChild(h('span', 'hz-val', `${Math.round(cur)} u · t/m ${fmtDayTime(end)}`));
   bar.appendChild(lbl);
   const seg = h('div', 'segmented compact');
-  const presets = [[6, '6 u'], [12, '12 u'], [24, '24 u'], [48, '48 u']];
+  const presets = [[12, '12 u'], [24, '24 u'], [48, '48 u']];
   for (const [hrs, label] of presets) {
     const btn = h('button', null, label); btn.type = 'button';
     const active = Math.abs(cur - hrs) < 0.5;
@@ -1044,7 +1050,6 @@ function horizonBar() {
     seg.appendChild(btn);
   }
   bar.appendChild(seg);
-  bar.appendChild(h('p', 'hz-hint', 'Knijp op een grafiek om in of uit te zoomen; de keuze wordt onthouden.'));
   return bar;
 }
 function spanTitle() {
@@ -1081,7 +1086,7 @@ function renderRain(c) {
   c.appendChild(hero);
 
   // nowcast card
-  const k1 = card('Komende 2 uur', ['Radar · per 5 minuten']);
+  const k1 = card('Komende 2 uur', []);
   c.appendChild(k1.el);
   if (nc && nc.length) {
     const tMin = new Date(Math.min(now.getTime(), nc[0].t.getTime())), tMax = new Date(nc[nc.length - 1].t.getTime() + MIN5); // start at 'nu' so the now-line sits at the left edge
@@ -1102,7 +1107,7 @@ function renderRain(c) {
   c.appendChild(k2.el);
   if (!H || !H.applicable) { errorNote(k2.body, 'forecast', 'Modelverwachting'); if (!state.errors.forecast) k2.body.appendChild(h('p', 'empty', 'Geen verwachting voor deze locatie.')); return; }
   k2.el.querySelector('h2').textContent = spanTitle();
-  k2.el.querySelector('.meta').append('Verwachting per uur');
+
   const modelPts = m => m.interval.map(p => ({ t: p.t, tEnd: p.tEnd, v: p.precipitation, rain: p.rain, snow: p.snowfall }));
   drawChart(k2.body, { sky: skyOf(),
     ...spanFor([H]), unit: 'mm/u', unitTip: 'mm', ticks: 'days', now, yOpts: { zero: true, minSpan: 1, headroom: 1.15 },
@@ -1211,12 +1216,12 @@ function renderOverview(c) {
   const today = H.instant.filter(p => p.t.getDate() === r0.t.getDate());
   const mx = Math.max(...today.map(p => p.temperature_2m)), mn = Math.min(...today.map(p => p.temperature_2m));
   const temp = o && o.temp != null ? o.temp : r0.temperature_2m;
-  heroBlock(c, '<svg class="ico-big" viewBox="0 0 24 24"><circle cx="9" cy="9" r="3.6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M9 2.5v1.6M9 13.9v1.6M2.5 9h1.6M13.9 9h1.6M4.4 4.4l1.1 1.1M12.5 12.5l1.1 1.1M4.4 13.6l1.1-1.1M12.5 5.5l1.1-1.1" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M12 20.5a3.2 3.2 0 0 1-.4-6.37A4.3 4.3 0 0 1 19.9 13h.3a2.9 2.9 0 0 1 0 5.8H12z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
+  heroBlock(c, '<svg class="ico-big" viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 10h.5a4 4 0 0 1 0 8H7z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
     o && o.temp != null ? `Gemeten ${fmtTime(o.time)} · ${o.station}` : `Nu · ${fmtTime(r0.t)} · verwacht`,
     `${fmtNum(temp, 0)}° · ${word0}`, `voelt als ${fmtNum(o && o.feel != null ? o.feel : r0.apparent_temperature, 0)}° · vandaag ${fmtNum(mn, 0)}° tot ${fmtNum(mx, 0)}°`);
 
   c.appendChild(horizonBar());
-  const k = card(spanTitle(), ['Temperatuur per uur, met het weerbeeld van dat uur']);
+  const k = card(spanTitle(), []);
   c.appendChild(k.el);
   const icons = hourIcons(H);
   const pts = H.instant.map(r => ({ t: r.t, tEnd: new Date(r.t.getTime() + HOUR), v: r.temperature_2m, row: r }));
@@ -1237,7 +1242,6 @@ function renderOverview(c) {
     series: [{ kind: 'bar', name: 'Neerslag', color: 'var(--s1)', points: rain }], fmt: fmtMm, tipTime: p => `${fmtWd(p.t)} ${fmtHourRange(p.t)}`,
     aria: 'Neerslag per uur',
   });
-  legend(k.el, [{ name: 'Temperatuur', color: 'var(--s2)', note: 'blauw = koud, oranje = warm' }, { name: 'Neerslag per uur', color: 'var(--s1)', rect: true }, { name: 'Icoontje = weerbeeld, boompje = wind van dat uur', color: 'var(--label-3)', rect: true }]);
   k.tableHost.appendChild(dataTable(H.instant, [{ label: 'Uur', get: p => fmtDayTime(p.t) }, { label: '°C', num: true, get: p => fmtNum(p.temperature_2m, 0) }, { label: 'Weer', get: p => { const ic = icons.find(i => i.hour.getTime() === p.t.getTime()); return ic ? (ic.kind === 'clear' && ic.night ? 'helder' : ICON_WORDS[ic.kind]) : ''; } }, { label: 'mm', num: true, get: p => { const iv = H.interval.find(q => q.t.getTime() === p.t.getTime()); return iv ? fmtNum(iv.precipitation, 1) : '–'; } }]));
 }
 
@@ -1342,28 +1346,46 @@ function windTree(g, kmh, dirDeg, rainMm = null) {
   g.dataset.bft = b;
   return b;
 }
-/* animated wind field: streaks flowing in the wind direction, faster and bolder with more wind */
+/* animated wind field: 16 streaks scattered around the tree. Each streak travels along the wind's screen
+   vector: east/west is left/right, and the north/south part becomes depth. Wind blowing towards the viewer
+   (from the north) comes from the top, moves down and grows; wind blowing away (from the south) starts low,
+   moves up and shrinks. Every streak's own axis is aligned with its motion, so it reads as a vector. */
+const WIND_TRAVEL = 130;
 function makeWindField() {
   const f = svgEl('g', { class: 'windfield' });
-  const inner = svgEl('g', { class: 'windfield-inner' });
   for (let i = 0; i < 16; i++) {
-    const y = 6 + ((i * 37) % 96), len = 10 + ((i * 13) % 14);
-    inner.appendChild(svgEl('line', { x1: -70 - ((i * 29) % 60), y1: y, x2: -70 - ((i * 29) % 60) + len, y2: y, style: `animation-delay:${(-(i * 0.47) % 4).toFixed(2)}s` }));
+    const bx = 4 + ((i * 41) % 92), by = 4 + ((i * 53) % 98), len = 8 + ((i * 13) % 12);
+    const s = svgEl('g', { class: 'streak', 'data-bx': bx, 'data-by': by });
+    s.appendChild(svgEl('line', { x1: -len / 2, y1: 0, x2: len / 2, y2: 0, style: `animation-delay:${(-(i * 0.47) % 4).toFixed(2)}s` }));
+    f.appendChild(s);
   }
-  f.appendChild(inner);
   return f;
+}
+function windVector(dirDeg) {
+  const to = rad((dirDeg == null ? 270 : dirDeg) + 180);
+  return { dx: Math.sin(to), dn: Math.cos(to) }; // dx > 0: naar rechts (oost); dn > 0: naar het noorden = van de kijker af
 }
 function setWindField(f, kmh, dirDeg) {
   const b = beaufort(kmh || 0);
-  const to = rad((dirDeg == null ? 270 : dirDeg) + 180);
-  const dx = Math.sin(to), dn = Math.cos(to); // dn > 0: wind blows north (away from the viewer)
-  const sign = Math.abs(dx) < 0.3 ? (dx < 0 ? -1 : 1) : Math.sign(dx);
-  const tilt = -dn * 12; // away = streaks rise a little, towards = they dip a little
-  f.style.setProperty('--wangle', `${(sign < 0 ? 180 - tilt : tilt).toFixed(1)}deg`);
+  const { dx, dn } = windVector(dirDeg);
+  const sx = dx, sy = -dn * 0.75; // screen motion: towards the viewer = downwards
+  const ang = deg(Math.atan2(sy, sx));
+  const towards = Math.max(0, -dn), away = Math.max(0, dn);
+  f.style.setProperty('--travel', `${WIND_TRAVEL}px`);
+  f.style.setProperty('--s0', (1 - 0.5 * towards + 0.6 * away).toFixed(2));
+  f.style.setProperty('--s1', (1 + 1.1 * towards - 0.55 * away).toFixed(2));
   f.style.setProperty('--wperiod', `${(6 / (1 + b * 0.9)).toFixed(2)}s`);
   f.style.setProperty('--wop', (0.08 + Math.min(0.55, b * 0.07)).toFixed(2));
   f.style.setProperty('--wlen', (0.6 + b * 0.25).toFixed(2));
   f.classList.toggle('calm', b === 0);
+  const mag = Math.hypot(sx, sy) || 1;
+  const ux = sx / mag, uy = sy / mag;
+  for (const s of f.querySelectorAll('.streak')) {
+    // start half a travel upstream of the scatter point, so the streak passes through it
+    const x = parseFloat(s.dataset.bx) - ux * WIND_TRAVEL / 2, y = parseFloat(s.dataset.by) - uy * WIND_TRAVEL / 2;
+    s.setAttribute('transform', `translate(${x.toFixed(1)},${y.toFixed(1)}) rotate(${ang.toFixed(1)})`);
+  }
+  return { ang, b };
 }
 function treeView() {
   const wrap = h('div', 'tree');
@@ -1439,7 +1461,7 @@ function renderTemp(c) {
   }
 
   c.appendChild(horizonBar());
-  const k1 = card(spanTitle(), ['Verwachting per uur']);
+  const k1 = card(spanTitle(), []);
   c.appendChild(k1.el);
   drawChart(k1.body, { sky: skyOf(),
     ...spanFor([H]), unit: '°C', unitTip: '°C', ticks: 'days', now: new Date(), yOpts: { minSpan: 6, targetTicks: 4 },
@@ -1469,7 +1491,7 @@ function renderWind(c) {
   }
 
   c.appendChild(horizonBar());
-  const k1 = card(spanTitle(), ['Verwachting per uur · wind op 10 m hoogte']);
+  const k1 = card(spanTitle(), []);
   c.appendChild(k1.el);
   const arrows = H.instant.filter(p => p.t.getHours() % 3 === 0 && p.wind_direction_10m != null).map(p => ({ t: p.t, deg: p.wind_direction_10m }));
   drawChart(k1.body, { sky: skyOf(),
@@ -1503,7 +1525,7 @@ function renderCloud(c) {
     `Nu · ${fmtTime(r0.t)}`, cloudWord(r0.cloud_cover), `${r0.cloud_cover}% bedekt · laag ${r0.cloud_cover_low}% · midden ${r0.cloud_cover_mid}% · hoog ${r0.cloud_cover_high}%`);
 
   c.appendChild(horizonBar());
-  const k1 = card(spanTitle(), ['Verwachting per uur · deel van de hemel bedekt']);
+  const k1 = card(spanTitle(), []);
   c.appendChild(k1.el);
   const pct = { min: 0, max: 100, step: 25 };
   drawChart(k1.body, { sky: skyOf(),
@@ -1884,8 +1906,12 @@ function runTests() {
     const el = treeView();
     setTree(el, 20, 270, 'x', 0.6); ok(el.querySelector('.treeg').classList.contains('raining'), 'regen'); ok(el.querySelector('.tree-caption').textContent.includes('mm'), 'mm in bijschrift');
     setTree(el, 20, 270, 'x', 0); ok(!el.querySelector('.treeg').classList.contains('raining'), 'droog');
-    const f = el.querySelector('.windfield'); setWindField(f, 30, 270); ok(f.style.getPropertyValue('--wangle').startsWith('-0') || f.style.getPropertyValue('--wangle').startsWith('0'), 'westenwind: streken naar rechts, kreeg ' + f.style.getPropertyValue('--wangle'));
-    setWindField(f, 30, 90); ok(parseFloat(f.style.getPropertyValue('--wangle')) > 150, 'oostenwind: streken naar links');
+    const f = el.querySelector('.windfield');
+    near(setWindField(f, 30, 270).ang, 0, 1, 'westenwind: streken naar rechts');
+    ok(Math.abs(setWindField(f, 30, 90).ang) > 179, 'oostenwind: streken naar links');
+    near(setWindField(f, 30, 0).ang, 90, 1, 'noordenwind: streken naar beneden (naar de kijker)'); ok(parseFloat(f.style.getPropertyValue('--s1')) > parseFloat(f.style.getPropertyValue('--s0')), 'noordenwind: streken groeien');
+    near(setWindField(f, 30, 180).ang, -90, 1, 'zuidenwind: streken omhoog (van de kijker af)'); ok(parseFloat(f.style.getPropertyValue('--s1')) < parseFloat(f.style.getPropertyValue('--s0')), 'zuidenwind: streken krimpen');
+    ok(f.querySelector('.streak').getAttribute('transform').includes('rotate(-90'), 'streek gedraaid langs de bewegingsrichting');
     setTree(el, 0, 0, 'x'); eq(el.querySelector('.treeg').style.getPropertyValue('--amp'), '0.5deg', 'minimale beweging bij windstil');
   });
   test('boom: Beaufort stuurt zwaai, scheefstand en richting; vanaf 5 Bft vliegen bladeren', () => {

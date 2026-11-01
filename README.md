@@ -113,3 +113,9 @@ Knijpen tekent de grafieken in place opnieuw (de bezig-aanraking blijft op hetze
 - **Boom:** bruine stam en takken met donkere rand; blaadjes als druppelvorm met nerf in twee groentinten, aan de toppen en halverwege de takken. Plaatsing en animatie zitten in gescheiden groepen (de CSS-animatie overschreef anders de SVG-transform). Ook bij windstilte een minimale beweging van 0,5°, zodat de boom nooit bevriest. Bij regen in dat uur vallen druppels schuin met de wind mee.
 - **Windveld** op de windpagina in plaats van rook: zestien streken die in de windrichting stromen, met snelheid, lengte en dekking die oplopen met Beaufort; wind naar het noorden (van de kijker af) laat ze licht stijgen, naar het zuiden licht dalen.
 - **Boompjesrij** in het overzicht: onder elk weericoontje een boompje op dezelfde uren, geschaald naar de ruimte (0,2–0,3), met regen waar het regent.
+
+## Versie 10: windveld in 3D, scènes in het overzicht, minder tekst
+
+- **Windveld** rekent nu met de volledige windvector. Oost/west is links/rechts; het noord/zuid-deel wordt diepte: wind naar de kijker toe (uit het noorden) komt van boven, beweegt omlaag en wordt groter; wind van de kijker af (uit het zuiden) begint laag, beweegt omhoog en krimpt. Elke streek is langs zijn eigen bewegingsrichting gedraaid en begint een halve reis stroomopwaarts van zijn strooipunt.
+- **Overzicht:** onder de wolkjes staan nu dezelfde scènes als op de windpagina (boom + windveld + regen) als geneste SVG's van 40–56 px, op de uren van de wolkjes, zo veel als er met minstens 44 px tussenruimte passen (meestal één per twee wolkjes).
+- **Tekst:** alle uitleg onder titels en onder de zoomknoppen is weg, en de legenda van het overzicht ook; de info-pagina legt alles uit. Zoompresets: 12, 24, 48 uur. De tegel van het overzicht gebruikt hetzelfde wolkje als Regen en Bewolking.
