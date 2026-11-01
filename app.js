@@ -1275,81 +1275,88 @@ const TREE_BRANCHES = [
   { d: 'M57 44 C60 34 62 26 64 18', end: [64, 18], ang: -70 },
   { d: 'M57 46 C66 40 74 36 82 30', end: [82, 30], ang: 32 },
 ];
-/* cartoon leaf: teardrop with a vein, drawn along +x from its stem at (0,0); rotated into place */
+/* Tree seen from slightly above (viewBox 0 0 100 110): a round crown of branches radiating from the trunk top,
+   a short trunk down to the foot at (50,90) and a shadow on the ground. In this view the compass maps straight
+   onto the screen: north is up, east is right. Wind pushes the crown off the foot in the direction it blows. */
 const LEAF_D = 'M0 0 C1.5 -4.2 6.5 -5.4 11 -2.2 C9.5 2.4 5 4.4 0 0 Z';
+const CROWN = { cx: 50, cy: 60 }; // crown centre at rest; foot at (50, 90)
+const GROUND_FORESHORTEN = 0.6;    // north/south distances look shorter from this angle
 function makeTree(scale = 1) {
   const g = svgEl('g', { class: 'treeg' });
-  const sway = svgEl('g', { class: 'tree-sway' }); // rotates around the foot: lean + sway
-  // brown trunk with a darker outline (outline drawn first, wider)
-  sway.appendChild(svgEl('path', { class: 'trunk edge', d: 'M50 106 C51 92 46 80 50 66 C53 56 54 48 56 40' }));
-  sway.appendChild(svgEl('path', { class: 'trunk', d: 'M50 106 C51 92 46 80 50 66 C53 56 54 48 56 40' }));
-  sway.appendChild(svgEl('path', { class: 'trunk thin edge', d: 'M52 66 C55 56 56 46 58 34' }));
-  sway.appendChild(svgEl('path', { class: 'trunk thin', d: 'M52 66 C55 56 56 46 58 34' }));
-  TREE_BRANCHES.forEach((b, i) => {
-    const [, ox, oy] = b.d.match(/M(\d+) (\d+)/);
-    const br = svgEl('g', { class: 'branch', style: `transform-origin:${ox}px ${oy}px;animation-delay:${(-i * 0.23).toFixed(2)}s` });
-    br.appendChild(svgEl('path', { class: 'bough edge', d: b.d }));
-    br.appendChild(svgEl('path', { class: 'bough', d: b.d }));
-    // leaves fanned out around the branch tip, plus two halfway along the branch, alternating the two greens
-    const [ex, ey] = b.end;
-    // outer group carries the SVG placement; the inner group is what the CSS flutter animates (it would
-    // otherwise overwrite the placement transform)
-    const leaf = (lx, ly, a, k) => {
-      const place = svgEl('g', { transform: `translate(${lx.toFixed(1)},${ly.toFixed(1)}) rotate(${a.toFixed(0)})` });
-      const lg = svgEl('g', { class: `leaf ${k % 2 ? 'alt' : ''}`, style: `animation-delay:${(-(i * 6 + k) * 0.17).toFixed(2)}s` });
+  g.appendChild(svgEl('ellipse', { class: 'shadow', cx: 50, cy: 91, rx: 23, ry: 8 }));
+  g.appendChild(svgEl('path', { class: 'trunk edge', d: `M50 90 L${CROWN.cx} ${CROWN.cy}` }));
+  g.appendChild(svgEl('path', { class: 'trunk', d: `M50 90 L${CROWN.cx} ${CROWN.cy}` }));
+  const crown = svgEl('g', { class: 'crown' }); // translated by the lean, rotated by the sway (CSS)
+  for (let i = 0; i < 6; i++) {
+    const a = i * 60 - 90 + (i % 2) * 12;
+    const ex = CROWN.cx + Math.cos(rad(a)) * 26, ey = CROWN.cy + Math.sin(rad(a)) * 26;
+    const br = svgEl('g', { class: 'branch', style: `transform-origin:${CROWN.cx}px ${CROWN.cy}px;animation-delay:${(-i * 0.23).toFixed(2)}s` });
+    br.appendChild(svgEl('path', { class: 'bough edge', d: `M${CROWN.cx} ${CROWN.cy} L${ex.toFixed(1)} ${ey.toFixed(1)}` }));
+    br.appendChild(svgEl('path', { class: 'bough', d: `M${CROWN.cx} ${CROWN.cy} L${ex.toFixed(1)} ${ey.toFixed(1)}` }));
+    // leaves along the branch, alternating sides, plus a pair at the tip
+    [[10, -42], [15, 40], [20, -38], [25, 36], [27, -8], [27, 10]].forEach(([r, da], k) => {
+      const lx = CROWN.cx + Math.cos(rad(a)) * r, ly = CROWN.cy + Math.sin(rad(a)) * r;
+      const place = svgEl('g', { transform: `translate(${lx.toFixed(1)},${ly.toFixed(1)}) rotate(${(a + da).toFixed(0)})` });
+      const lg = svgEl('g', { class: `leaf ${(i + k) % 2 ? 'alt' : ''}`, style: `animation-delay:${(-(i * 6 + k) * 0.17).toFixed(2)}s` });
       lg.appendChild(svgEl('path', { class: 'blade', d: LEAF_D }));
       lg.appendChild(svgEl('path', { class: 'vein', d: 'M0.8 -0.2 L9.6 -2.4' }));
       place.appendChild(lg);
       br.appendChild(place);
-    };
-    for (let k = 0; k < 4; k++) {
-      const a = b.ang + (k - 1.5) * 40;
-      leaf(ex + Math.cos(rad(a)) * 2, ey + Math.sin(rad(a)) * 2, a, k);
-    }
-    const nums = b.d.match(/-?\d+(\.\d+)?/g).map(Number); // M x0 y0 C x1 y1 x2 y2 x3 y3
-    const at = (tt) => { const u = 1 - tt; return [0, 1].map(j => u * u * u * nums[j] + 3 * u * u * tt * nums[2 + j] + 3 * u * tt * tt * nums[4 + j] + tt * tt * tt * nums[6 + j]); };
-    const [mx, my] = at(0.55);
-    leaf(mx, my, b.ang - 70, 4);
-    leaf(mx, my, b.ang + 70, 5);
-    sway.appendChild(br);
-  });
-  g.appendChild(sway);
+    });
+    crown.appendChild(br);
+  }
+  g.appendChild(crown);
   const flyers = svgEl('g', { class: 'flyers' });
   for (let i = 0; i < 5; i++) {
-    const place = svgEl('g', { transform: `translate(${50 + (i - 2) * 7},${40 + (i % 3) * 9})` });
+    const place = svgEl('g', { transform: `translate(${CROWN.cx + (i - 2) * 9},${CROWN.cy + (i % 3) * 8 - 8})` });
     const fg = svgEl('g', { class: `flyer ${i % 2 ? 'alt' : ''}`, style: `animation-delay:${(-i * 0.41).toFixed(2)}s` });
     fg.appendChild(svgEl('path', { class: 'blade', d: LEAF_D }));
     place.appendChild(fg);
     flyers.appendChild(place);
   }
   g.appendChild(flyers);
-  // rain over the tree, shown only when the hour is wet
+  // rain seen from above: drops splashing on the ground around the tree
   const rain = svgEl('g', { class: 'raindrops' });
-  for (let i = 0; i < 7; i++) rain.appendChild(svgEl('line', { x1: 18 + i * 11, y1: 8, x2: 16.5 + i * 11, y2: 16, style: `animation-delay:${(-i * 0.19).toFixed(2)}s` }));
+  for (let i = 0; i < 9; i++) {
+    const place = svgEl('g', { transform: `translate(${8 + ((i * 37) % 86)},${12 + ((i * 53) % 90)})` });
+    place.appendChild(svgEl('circle', { class: 'drop', r: 3, style: `animation-delay:${(-i * 0.21).toFixed(2)}s` }));
+    rain.appendChild(place);
+  }
   g.appendChild(rain);
   if (scale !== 1) g.setAttribute('transform', `scale(${scale})`);
   return g;
 }
-/* apply a wind (and optional rain) to a tree group: lean/sway from Beaufort, direction = where the wind blows to.
-   Even at 0 Bft the tree keeps a faint breathing motion so it never looks frozen. */
+function windVector(dirDeg) {
+  const to = rad((dirDeg == null ? 270 : dirDeg) + 180);
+  return { dx: Math.sin(to), dn: Math.cos(to) }; // dx > 0: naar oost (rechts); dn > 0: naar noord (omhoog)
+}
+/* screen vector of the wind: east = right, north = up (foreshortened) */
+function windScreen(dirDeg) {
+  const { dx, dn } = windVector(dirDeg);
+  const sx = dx, sy = -dn * GROUND_FORESHORTEN;
+  const mag = Math.hypot(sx, sy) || 1;
+  return { sx, sy, ux: sx / mag, uy: sy / mag, ang: deg(Math.atan2(sy, sx)) };
+}
+/* apply a wind (and optional rain) to a tree: the crown shifts off the foot along the wind, sways with
+   Beaufort amplitude, and from 5 Bft leaves fly off. Even at 0 Bft the crown keeps a faint breathing motion. */
 function windTree(g, kmh, dirDeg, rainMm = null) {
   const b = beaufort(kmh || 0);
-  const dx = Math.sin(rad((dirDeg == null ? 270 : dirDeg) + 180)); // +x = naar rechts
-  const sign = Math.abs(dx) < 0.3 ? (dx < 0 ? -0.3 : 0.3) : dx;
-  g.style.setProperty('--amp', `${Math.max(0.5, TREE.amp[b])}deg`);
-  g.style.setProperty('--lean', `${(TREE.lean[b] * sign).toFixed(1)}deg`);
+  const w = windScreen(dirDeg);
+  const leanPx = TREE.lean[b] * 0.9; // degrees of lean become pixels of crown offset
+  const lx = w.ux * leanPx, ly = w.uy * leanPx;
+  g.style.setProperty('--amp', `${Math.max(0.5, TREE.amp[b] * 0.6)}deg`);
   g.style.setProperty('--period', `${TREE.period[b]}s`);
-  g.style.setProperty('--dx', sign.toFixed(2));
-  g.style.setProperty('--rainslant', `${(-sign * Math.min(12, 2 + 3 * b)).toFixed(1)}px`);
+  g.style.setProperty('--lx', `${lx.toFixed(1)}px`); g.style.setProperty('--ly', `${ly.toFixed(1)}px`);
+  g.style.setProperty('--fx', `${(w.ux * 90).toFixed(1)}px`); g.style.setProperty('--fy', `${(w.uy * 90).toFixed(1)}px`);
+  // the trunk follows the crown: from the foot to the shifted crown centre
+  for (const t of g.querySelectorAll('.trunk')) t.setAttribute('d', `M50 90 L${(CROWN.cx + lx).toFixed(1)} ${(CROWN.cy + ly).toFixed(1)}`);
   g.classList.toggle('flying', b >= 5);
   g.classList.toggle('raining', rainMm != null && rainMm >= 0.1);
   g.dataset.bft = b;
   return b;
 }
-/* animated wind field: 16 streaks scattered around the tree. Each streak travels along the wind's screen
-   vector: east/west is left/right, and the north/south part becomes depth. Wind blowing towards the viewer
-   (from the north) comes from the top, moves down and grows; wind blowing away (from the south) starts low,
-   moves up and shrinks. Every streak's own axis is aligned with its motion, so it reads as a vector. */
+/* animated wind field: 16 streaks scattered over the scene, each travelling along the wind's screen vector
+   and turned along its own motion, so the field reads as a flow of small arrows (north = up). */
 const WIND_TRAVEL = 130;
 function makeWindField() {
   const f = svgEl('g', { class: 'windfield' });
@@ -1361,38 +1368,31 @@ function makeWindField() {
   }
   return f;
 }
-function windVector(dirDeg) {
-  const to = rad((dirDeg == null ? 270 : dirDeg) + 180);
-  return { dx: Math.sin(to), dn: Math.cos(to) }; // dx > 0: naar rechts (oost); dn > 0: naar het noorden = van de kijker af
-}
 function setWindField(f, kmh, dirDeg) {
   const b = beaufort(kmh || 0);
-  const { dx, dn } = windVector(dirDeg);
-  const sx = dx, sy = -dn * 0.75; // screen motion: towards the viewer = downwards
-  const ang = deg(Math.atan2(sy, sx));
-  const towards = Math.max(0, -dn), away = Math.max(0, dn);
+  const w = windScreen(dirDeg);
   f.style.setProperty('--travel', `${WIND_TRAVEL}px`);
-  f.style.setProperty('--s0', (1 - 0.5 * towards + 0.6 * away).toFixed(2));
-  f.style.setProperty('--s1', (1 + 1.1 * towards - 0.55 * away).toFixed(2));
   f.style.setProperty('--wperiod', `${(6 / (1 + b * 0.9)).toFixed(2)}s`);
   f.style.setProperty('--wop', (0.08 + Math.min(0.55, b * 0.07)).toFixed(2));
   f.style.setProperty('--wlen', (0.6 + b * 0.25).toFixed(2));
   f.classList.toggle('calm', b === 0);
-  const mag = Math.hypot(sx, sy) || 1;
-  const ux = sx / mag, uy = sy / mag;
   for (const s of f.querySelectorAll('.streak')) {
     // start half a travel upstream of the scatter point, so the streak passes through it
-    const x = parseFloat(s.dataset.bx) - ux * WIND_TRAVEL / 2, y = parseFloat(s.dataset.by) - uy * WIND_TRAVEL / 2;
-    s.setAttribute('transform', `translate(${x.toFixed(1)},${y.toFixed(1)}) rotate(${ang.toFixed(1)})`);
+    const x = parseFloat(s.dataset.bx) - w.ux * WIND_TRAVEL / 2, y = parseFloat(s.dataset.by) - w.uy * WIND_TRAVEL / 2;
+    s.setAttribute('transform', `translate(${x.toFixed(1)},${y.toFixed(1)}) rotate(${w.ang.toFixed(1)})`);
   }
-  return { ang, b };
+  return { ang: w.ang, b };
 }
 function treeView() {
   const wrap = h('div', 'tree');
   const svg = svgEl('svg', { viewBox: '0 0 100 110', 'aria-hidden': 'true' });
   svg.appendChild(makeWindField());
-  svg.appendChild(svgEl('line', { class: 'ground', x1: 6, x2: 94, y1: 106, y2: 106 }));
   svg.appendChild(makeTree(1));
+  // compass hint in the corner: north is up
+  const comp = svgEl('g', { class: 'compass', transform: 'translate(90,10)' });
+  comp.appendChild(svgEl('path', { d: 'M0 -6 L3 2 L0 0.5 L-3 2 Z' }));
+  comp.appendChild(svgEl('text', { y: 11, 'text-anchor': 'middle' }, 'N'));
+  svg.appendChild(comp);
   wrap.appendChild(svg);
   const txt = h('div', 'tree-text');
   txt.appendChild(h('div', 'tree-caption'));
@@ -1404,13 +1404,12 @@ function setTree(el, kmh, dirDeg, label, rainMm = null) {
   const g = el.querySelector('.treeg');
   const b = windTree(g, kmh, dirDeg, rainMm);
   setWindField(el.querySelector('.windfield'), kmh, dirDeg);
-  for (const k of ['--amp', '--lean', '--period', '--dx']) el.style.setProperty(k, g.style.getPropertyValue(k));
+  for (const k of ['--amp', '--period', '--lx', '--ly']) el.style.setProperty(k, g.style.getPropertyValue(k));
   el.classList.toggle('flying', b >= 5); el.classList.toggle('still', b === 0);
   el.dataset.bft = b;
-  el.querySelector('.tree-caption').textContent = `${label} · ${fmtNum(kmh || 0, 0)} km/u · ${b} Bft${rainMm != null && rainMm >= 0.1 ? ` · ${fmtMm(rainMm)} mm` : ''}`;
+  el.querySelector('.tree-caption').textContent = `${label} · ${fmtNum(kmh || 0, 0)} km/u · ${b} Bft${dirDeg != null ? ` uit ${compass(dirDeg)}` : ''}${rainMm != null && rainMm >= 0.1 ? ` · ${fmtMm(rainMm)} mm` : ''}`;
   el.querySelector('.tree-desc').textContent = `${BEAUFORT[b][0]}: ${BEAUFORT[b][1]}`;
 }
-
 /* ---------------- Info: alles over de app, als verborgen tab ---------------- */
 function renderInfo(c) {
   const sec = (title, paras) => {
@@ -1907,18 +1906,22 @@ function runTests() {
     setTree(el, 20, 270, 'x', 0.6); ok(el.querySelector('.treeg').classList.contains('raining'), 'regen'); ok(el.querySelector('.tree-caption').textContent.includes('mm'), 'mm in bijschrift');
     setTree(el, 20, 270, 'x', 0); ok(!el.querySelector('.treeg').classList.contains('raining'), 'droog');
     const f = el.querySelector('.windfield');
-    near(setWindField(f, 30, 270).ang, 0, 1, 'westenwind: streken naar rechts');
+    near(setWindField(f, 30, 270).ang, 0, 1, 'westenwind: streken naar rechts (oost)');
     ok(Math.abs(setWindField(f, 30, 90).ang) > 179, 'oostenwind: streken naar links');
-    near(setWindField(f, 30, 0).ang, 90, 1, 'noordenwind: streken naar beneden (naar de kijker)'); ok(parseFloat(f.style.getPropertyValue('--s1')) > parseFloat(f.style.getPropertyValue('--s0')), 'noordenwind: streken groeien');
-    near(setWindField(f, 30, 180).ang, -90, 1, 'zuidenwind: streken omhoog (van de kijker af)'); ok(parseFloat(f.style.getPropertyValue('--s1')) < parseFloat(f.style.getPropertyValue('--s0')), 'zuidenwind: streken krimpen');
+    near(setWindField(f, 30, 0).ang, 90, 1, 'noordenwind: streken omlaag (naar het zuiden)');
+    near(setWindField(f, 30, 180).ang, -90, 1, 'zuidenwind: streken omhoog (naar het noorden)');
     ok(f.querySelector('.streak').getAttribute('transform').includes('rotate(-90'), 'streek gedraaid langs de bewegingsrichting');
+    const g = el.querySelector('.treeg');
+    windTree(g, 45, 270); ok(parseFloat(g.style.getPropertyValue('--lx')) > 5 && Math.abs(parseFloat(g.style.getPropertyValue('--ly'))) < 0.5, 'westenwind: kruin schuift naar rechts');
+    windTree(g, 45, 0); ok(parseFloat(g.style.getPropertyValue('--ly')) > 3, 'noordenwind: kruin schuift omlaag (zuid)');
+    ok(g.querySelector('.trunk').getAttribute('d').startsWith('M50 90'), 'stam begint bij de voet');
     setTree(el, 0, 0, 'x'); eq(el.querySelector('.treeg').style.getPropertyValue('--amp'), '0.5deg', 'minimale beweging bij windstil');
   });
   test('boom: Beaufort stuurt zwaai, scheefstand en richting; vanaf 5 Bft vliegen bladeren', () => {
     const el = treeView();
     setTree(el, 0, 90, 'x'); eq(el.dataset.bft, '0'); ok(el.classList.contains('still'), 'windstil');
-    setTree(el, 45, 270, 'x'); eq(el.dataset.bft, '6'); ok(el.classList.contains('flying'), 'bladeren vliegen'); ok(el.style.getPropertyValue('--lean').startsWith('9'), 'westenwind leunt naar rechts: ' + el.style.getPropertyValue('--lean'));
-    setTree(el, 45, 90, 'x'); ok(el.style.getPropertyValue('--lean').startsWith('-9'), 'oostenwind leunt naar links');
+    setTree(el, 45, 270, 'x'); eq(el.dataset.bft, '6'); ok(el.classList.contains('flying'), 'bladeren vliegen'); ok(parseFloat(el.style.getPropertyValue('--lx')) > 5, 'westenwind: kruin naar rechts: ' + el.style.getPropertyValue('--lx'));
+    setTree(el, 45, 90, 'x'); ok(parseFloat(el.style.getPropertyValue('--lx')) < -5, 'oostenwind: kruin naar links');
     setTree(el, 120, 180, 'x'); eq(el.dataset.bft, '12'); ok(el.querySelector('.tree-desc').textContent.startsWith('Orkaan'), 'orkaan');
     eq(BEAUFORT.length, 13);
   });

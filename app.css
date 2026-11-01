@@ -352,42 +352,40 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .chart .wicon.cloud .cloud path, .chart .wicon.rain .cloud path { fill: var(--cloud-lo); }
 .chart .wicon .drops line { stroke: var(--s1); stroke-width: 1.2; stroke-linecap: round; }
 
-/* ---------- the tree ---------- */
+/* ---------- the tree (seen from slightly above) ---------- */
 .tree { display: flex; align-items: center; gap: 12px; margin: 6px 0 2px; }
 .tree svg { width: 150px; height: 150px; flex: none; overflow: hidden; border-radius: 12px; }
-.tree .ground { stroke: var(--separator); stroke-width: 1.5; stroke-linecap: round; }
-.treeg .trunk { fill: none; stroke: #9a6a3a; stroke-width: 7; stroke-linecap: round; }
-.treeg .trunk.thin { stroke-width: 4.2; }
-.treeg .trunk.edge { stroke: #5a3a1a; stroke-width: 9.4; } .treeg .trunk.thin.edge { stroke-width: 6.4; }
-.treeg .bough { fill: none; stroke: #9a6a3a; stroke-width: 2.8; stroke-linecap: round; }
-.treeg .bough.edge { stroke: #5a3a1a; stroke-width: 4.6; }
+.treeg .shadow { fill: rgba(0, 0, 0, 0.16); }
+.treeg .trunk { fill: none; stroke: #9a6a3a; stroke-width: 6; stroke-linecap: round; }
+.treeg .trunk.edge { stroke: #5a3a1a; stroke-width: 8.4; }
+.treeg .bough { fill: none; stroke: #9a6a3a; stroke-width: 2.4; stroke-linecap: round; }
+.treeg .bough.edge { stroke: #5a3a1a; stroke-width: 4.2; }
 .treeg .leaf .blade { fill: #86d24a; stroke: #2f6b22; stroke-width: 0.9; stroke-linejoin: round; }
 .treeg .leaf.alt .blade { fill: #4fae3b; }
 .treeg .leaf .vein { fill: none; stroke: #2f6b22; stroke-width: 0.7; stroke-linecap: round; opacity: 0.8; }
 .treeg .flyer { opacity: 0; transform-box: fill-box; }
 .treeg .flyer .blade { fill: #86d24a; stroke: #2f6b22; stroke-width: 0.9; } .treeg .flyer.alt .blade { fill: #4fae3b; }
-.treeg .tree-sway { transform-box: view-box; transform-origin: 50px 106px; animation: tree-sway var(--period, 3s) ease-in-out infinite alternate; }
+.treeg .crown { transform-box: view-box; transform-origin: 50px 60px; animation: crown-sway var(--period, 3s) ease-in-out infinite alternate; }
 .treeg .branch { transform-box: view-box; animation: branch-sway var(--period, 3s) ease-in-out infinite alternate; }
 .treeg .leaf { transform-box: fill-box; transform-origin: 0% 55%; animation: leaf-flutter calc(var(--period, 3s) * 0.45) ease-in-out infinite alternate; }
 .treeg.flying .flyer { animation: leaf-fly calc(var(--period, 3s) * 1.6) linear infinite; }
 .treeg .raindrops { display: none; }
 .treeg.raining .raindrops { display: block; }
-.treeg .raindrops line { stroke: var(--s1); stroke-width: 1.3; stroke-linecap: round; opacity: 0.8; animation: rain-fall calc(var(--period, 3s) * 0.6) linear infinite; }
-.chart .mtree .treeg .trunk { stroke-width: 9; } .chart .mtree .treeg .trunk.edge { stroke-width: 11.5; }
-.chart .mtree .treeg .bough { stroke-width: 3.6; } .chart .mtree .treeg .bough.edge { stroke-width: 5.6; }
+.treeg .drop { fill: none; stroke: var(--s1); stroke-width: 1.2; opacity: 0; transform-box: fill-box; transform-origin: center; animation: drop-splash calc(var(--period, 3s) * 0.5) ease-out infinite; }
 .chart .mtree .treeg .leaf .blade { stroke-width: 1.2; }
 .windfield .streak line { transform-box: fill-box; transform-origin: center; }
 .windfield line { stroke: var(--label-2); stroke-width: 1.4; stroke-linecap: round; opacity: 0; animation: wind-streak var(--wperiod, 4s) linear infinite; }
 .windfield.calm line { opacity: 0.05; }
+.compass path { fill: var(--label-3); } .compass text { font-size: 7px; fill: var(--label-3); font-weight: 600; }
 .tree-text { font-size: 13px; color: var(--label-2); line-height: 1.35; }
 .tree-caption { font-weight: 600; color: var(--label); }
-@keyframes tree-sway { from { transform: rotate(calc(var(--lean, 0deg) - var(--amp, 0deg))); } to { transform: rotate(calc(var(--lean, 0deg) + var(--amp, 0deg))); } }
-@keyframes branch-sway { from { transform: rotate(calc(-0.6 * var(--amp, 0deg))); } to { transform: rotate(calc(0.6 * var(--amp, 0deg))); } }
-@keyframes leaf-flutter { from { transform: rotate(calc(-1.5 * var(--amp, 0deg))); } to { transform: rotate(calc(1.5 * var(--amp, 0deg))); } }
-@keyframes leaf-fly { 0% { opacity: 0; transform: translate(0, 0) rotate(0deg); } 12% { opacity: 0.9; } 100% { opacity: 0; transform: translate(calc(var(--dx, 1) * 95px), -18px) rotate(260deg); } }
-@keyframes rain-fall { from { transform: translate(0, -12px); opacity: 0; } 20% { opacity: 0.8; } to { transform: translate(var(--rainslant, 0px), 70px); opacity: 0; } }
-@keyframes wind-streak { 0% { transform: translateX(0) scale(calc(var(--s0, 1) * var(--wlen, 1)), var(--s0, 1)); opacity: 0; } 15% { opacity: var(--wop, 0.2); } 85% { opacity: var(--wop, 0.2); } 100% { transform: translateX(var(--travel, 130px)) scale(calc(var(--s1, 1) * var(--wlen, 1)), var(--s1, 1)); opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .treeg *, .windfield line { animation: none !important; } .treeg .tree-sway { transform: rotate(var(--lean, 0deg)); } }
+@keyframes crown-sway { from { transform: translate(var(--lx, 0px), var(--ly, 0px)) rotate(calc(-1 * var(--amp, 0deg))); } to { transform: translate(var(--lx, 0px), var(--ly, 0px)) rotate(var(--amp, 0deg)); } }
+@keyframes branch-sway { from { transform: rotate(calc(-0.8 * var(--amp, 0deg))); } to { transform: rotate(calc(0.8 * var(--amp, 0deg))); } }
+@keyframes leaf-flutter { from { transform: rotate(calc(-2 * var(--amp, 0deg))); } to { transform: rotate(calc(2 * var(--amp, 0deg))); } }
+@keyframes leaf-fly { 0% { opacity: 0; transform: translate(0, 0) rotate(0deg); } 12% { opacity: 0.9; } 100% { opacity: 0; transform: translate(var(--fx, 90px), var(--fy, 0px)) rotate(260deg); } }
+@keyframes drop-splash { 0% { opacity: 0; transform: scale(0.2); } 30% { opacity: 0.8; } 100% { opacity: 0; transform: scale(1.4); } }
+@keyframes wind-streak { 0% { transform: translateX(0) scaleX(var(--wlen, 1)); opacity: 0; } 15% { opacity: var(--wop, 0.2); } 85% { opacity: var(--wop, 0.2); } 100% { transform: translateX(var(--travel, 130px)) scaleX(var(--wlen, 1)); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .treeg *, .windfield line { animation: none !important; } .treeg .crown { transform: translate(var(--lx, 0px), var(--ly, 0px)); } }
 
 /* ---------- info page ---------- */
 .info-btn {
