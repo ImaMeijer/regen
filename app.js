@@ -26,7 +26,8 @@ const COMPARE_HOURS = 48;
 
 const $ = id => document.getElementById(id);
 const nl = 'nl-NL';
-const fmtNum = (v, d = 1) => v.toLocaleString(nl, { minimumFractionDigits: d, maximumFractionDigits: d });
+// a missing value shows as "–": models end at different hours per variable (ICON-D2 has no feels-like for its last hours)
+const fmtNum = (v, d = 1) => (v == null || !Number.isFinite(v) ? '–' : v.toLocaleString(nl, { minimumFractionDigits: d, maximumFractionDigits: d }));
 const fmtMm = v => (v > 0 && v < 0.05 ? '< 0,1' : fmtNum(v, v >= 10 ? 0 : 1)); // a little rain is never "0,0"
 const fmtTime = d => d.toLocaleTimeString(nl, { hour: '2-digit', minute: '2-digit' });
 const fmtDay = d => d.toLocaleDateString(nl, { weekday: 'short', day: 'numeric', month: 'short' });
@@ -2355,6 +2356,7 @@ function runTests() {
     const d = blendRain(mkH(() => {}).interval, mkNc(ncFrom, 24, { 16: 0.1, 18: 0.1, 19: 0.1 })); // 21:35–21:55 lichte radarregen
     near(d[1].precipitation, 0.03, 1e-9, 'radarregen van 0,025 mm blijft staan'); ok(d[1].precipitation > 0);
     eq(fmtMm(0.03), '< 0,1'); eq(fmtMm(0), '0,0'); eq(fmtMm(0.3), '0,3');
+    eq(fmtNum(null), '–', 'ontbrekende waarde'); eq(fmtNum(undefined, 0), '–'); eq(fmtMm(null), '–');
     eq(probFor(b[0]), null, 'geen kans voor een radaruur');
   });
   test('windveld: niets bij 0 Bft, genoeg vage streken voor de richting bij 1 Bft, dik en snel vanaf 7 Bft', () => {

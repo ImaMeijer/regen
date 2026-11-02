@@ -166,3 +166,8 @@ Eerste ronde verbeteringen na de audit van 1 november 2026.
 
 - **Melding zegt wat verouderd is:** bij een haperende bron stond er "Niet alles kon worden bijgewerkt. Een deel van wat je ziet is van 15:11." (2 nov: de verwachtings-API van Open-Meteo gaf `503 The service is overloaded`, de rest was vers). Nu noemt de melding de bron: "De verwachting kon niet worden bijgewerkt en is van 15:11.", bij meer bronnen "De verwachting en de radar konden …", met per bron een tijd als die verschillen. De ondertitel zegt bij één bron "verwachting van 15:11" in plaats van "deels verouderd". Bronnen: verwachting, kans en onzekerheidsband, radar, metingen. Zonder verbinding blijft "Geen verbinding".
 - Zelftests: 63.
+
+## Versie 17: ontbrekende waarden breken geen tabel meer
+
+- **Temperatuur-tab:** ICON-D2 levert voor de laatste uren van zijn run geen gevoelstemperatuur. De tabel liep daarop vast (`fmtNum(null)`), waardoor de tabel ontbrak en er een fout in de console kwam. `fmtNum` toont een ontbrekende waarde nu als "–"; dat geldt voor alle tabellen en tooltips.
+- Zelftests: 63.
