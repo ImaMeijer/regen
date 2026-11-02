@@ -1018,17 +1018,29 @@ function freshOnly(nowcast, obs, now) {
   return { nowcast: nc && nc.length ? nc : null, obs: obs && now - obs.time <= OBS_MAX_AGE ? obs : null };
 }
 /* Sources shown from a stored copy older than STALE_AFTER (a copy of a minute old is as good as fresh, so one
-   hiccup of one source raises no alarm). null when everything is current; else { since, all }: the oldest
-   fetch moment, and whether every source failed (no connection) or only some. */
+   hiccup of one source raises no alarm). null when everything is current; else { since, all, parts }: the oldest
+   fetch moment, whether every source failed (no connection) or only some, and which ones with their time. */
 const STALE_AFTER = 10 * 60e3;
+const SOURCE_NAMES = { forecast: 'verwachting', ens: 'kans en onzekerheidsband', nowcast: 'radar', obs: 'metingen' };
 function staleSince(now = new Date()) {
   const f = Object.values(state.fetched || {});
-  const old = f.filter(x => x.stored && now - x.at > STALE_AFTER);
-  if (!old.length) return null;
-  return { since: new Date(Math.min(...old.map(x => x.at.getTime()))), all: f.every(x => x.stored) };
+  const parts = Object.keys(SOURCE_NAMES)
+    .filter(k => { const x = state.fetched && state.fetched[k]; return x && x.stored && now - x.at > STALE_AFTER; })
+    .map(k => ({ key: k, at: state.fetched[k].at }));
+  if (!parts.length) return null;
+  return { since: new Date(Math.min(...parts.map(x => x.at.getTime()))), all: f.every(x => x.stored), parts };
 }
 const sameDay = (a, b) => a.toDateString() === b.toDateString();
 const fmtWhen = d => (sameDay(d, new Date()) ? fmtTime(d) : fmtDayTime(d));
+const joinNl = xs => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} en ${xs[xs.length - 1]}`);
+/* "De verwachting kon niet worden bijgewerkt en is van 15:11." — names the sources, with a time each when they differ. */
+function staleText({ since, all, parts }) {
+  if (all) return `Geen verbinding. Je ziet de gegevens van ${fmtWhen(since)}; die worden ververst zodra er weer verbinding is.`;
+  const one = parts.length === 1, sameTime = parts.every(p => fmtWhen(p.at) === fmtWhen(since));
+  const list = joinNl(parts.map(p => `de ${SOURCE_NAMES[p.key]}` + (sameTime ? '' : ` (${fmtWhen(p.at)})`)));
+  return `${list[0].toUpperCase()}${list.slice(1)} ${one ? 'kon' : 'konden'} niet worden bijgewerkt` +
+    (sameTime ? ` en ${one ? 'is' : 'zijn'} van ${fmtWhen(since)}.` : '.');
+}
 
 let refreshTimer = null;
 async function load() {
@@ -1074,7 +1086,10 @@ function render() {
   hideTooltip();
   $('title').textContent = TABS[state.tab];
   const stale = staleSince();
-  const when = stale ? `${stale.all ? 'offline' : 'deels verouderd'} · gegevens van ${fmtWhen(stale.since)}` : state.updated ? `bijgewerkt ${fmtTime(state.updated)}` : '';
+  const when = !stale ? (state.updated ? `bijgewerkt ${fmtTime(state.updated)}` : '')
+    : stale.all ? `offline · gegevens van ${fmtWhen(stale.since)}`
+    : stale.parts.length === 1 ? `${SOURCE_NAMES[stale.parts[0].key]} van ${fmtWhen(stale.since)}`
+    : `deels verouderd · gegevens van ${fmtWhen(stale.since)}`;
   $('subtitle').textContent = state.tab === 'info' ? 'Over deze app en haar bronnen' : state.updated ? `${state.loc.name}${state.loc.admin ? ', ' + state.loc.admin : ''} · ${when}` : state.loc.name;
   const infoBtn = $('infoBtn'); if (infoBtn) infoBtn.hidden = state.tab === 'info';
   $('sunline').hidden = state.tab === 'info';
@@ -1099,13 +1114,11 @@ function render() {
   }
 }
 
-function staleNote({ since, all }) {
+function staleNote(stale) {
   const n = h('div', 'warn stale');
   n.setAttribute('role', 'status');
   n.innerHTML = '<svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M10 5.8V10l2.8 1.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-  n.appendChild(h('span', null, all
-    ? `Geen verbinding. Je ziet de gegevens van ${fmtWhen(since)}; die worden ververst zodra er weer verbinding is.`
-    : `Niet alles kon worden bijgewerkt. Een deel van wat je ziet is van ${fmtWhen(since)}.`));
+  n.appendChild(h('span', null, staleText(stale)));
   return n;
 }
 
@@ -2389,6 +2402,21 @@ function runTests() {
       let s = staleSince(NOW); ok(s && !s.all, 'deels'); eq(s.since.getMinutes(), 48);
       state.fetched = { forecast: at(40), ens: at(40), nowcast: at(40), obs: at(40) };
       s = staleSince(NOW); ok(s && s.all, 'alles: geen verbinding');
+    } finally { state.fetched = saved; }
+  });
+  test('verouderd-melding noemt wat verouderd is', () => {
+    const saved = state.fetched;
+    try {
+      const at = m => ({ at: new Date(NOW.getTime() - m * 60e3), stored: true }), fresh = { at: NOW, stored: false };
+      state.fetched = { forecast: at(15), ens: fresh, nowcast: fresh, obs: fresh };
+      let s = staleSince(NOW); eq(s.parts.length, 1); eq(s.parts[0].key, 'forecast');
+      let t = staleText(s); ok(t.startsWith('De verwachting kon niet worden bijgewerkt en is van '), t);
+      state.fetched = { forecast: at(15), ens: fresh, nowcast: at(15), obs: fresh };
+      t = staleText(staleSince(NOW)); ok(t.startsWith('De verwachting en de radar konden niet worden bijgewerkt en zijn van '), t);
+      state.fetched = { forecast: at(40), ens: at(15), nowcast: fresh, obs: fresh };
+      t = staleText(staleSince(NOW)); ok(/^De verwachting \(.+\) en de kans en onzekerheidsband \(.+\) konden niet worden bijgewerkt\.$/.test(t), t);
+      ok(staleText({ since: NOW, all: true, parts: [] }).startsWith('Geen verbinding.'), 'offline');
+      eq(joinNl(['a']), 'a'); eq(joinNl(['a', 'b', 'c']), 'a, b en c');
     } finally { state.fetched = saved; }
   });
   test('temperatuur: ICON-D2 als dat er is, anders HARMONIE', () => {
