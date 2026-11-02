@@ -26,7 +26,7 @@ const COMPARE_HOURS = 48;
 const $ = id => document.getElementById(id);
 const nl = 'nl-NL';
 const fmtNum = (v, d = 1) => v.toLocaleString(nl, { minimumFractionDigits: d, maximumFractionDigits: d });
-const fmtMm = v => fmtNum(v, v >= 10 ? 0 : 1);
+const fmtMm = v => (v > 0 && v < 0.05 ? '< 0,1' : fmtNum(v, v >= 10 ? 0 : 1)); // a little rain is never "0,0"
 const fmtTime = d => d.toLocaleTimeString(nl, { hour: '2-digit', minute: '2-digit' });
 const fmtDay = d => d.toLocaleDateString(nl, { weekday: 'short', day: 'numeric', month: 'short' });
 const fmtWd = d => d.toLocaleDateString(nl, { weekday: 'short' });
@@ -595,7 +595,8 @@ function drawChart(host, spec) {
         let w = Math.max(1, xb - xa), xs = xa;
         if (w > 24) { xs = xa + (w - 24) / 2; w = 24; }
         if (p.v <= 0) { marks.push({ s, p, el: null }); continue; }
-        const top = y(p.v), hgt = y(sc.min) - top;
+        // any rain at all stays visible: at least 2 px, even 0,02 mm on an axis to 1,5
+        const hgt = Math.max(2, y(sc.min) - y(p.v)), top = y(sc.min) - hgt;
         const r = Math.min(4, w / 2, hgt);
         const d = `M${xs},${y(sc.min)} V${top + r} a${r},${r} 0 0 1 ${r},-${r} H${xs + w - r} a${r},${r} 0 0 1 ${r},${r} V${y(sc.min)} Z`;
         const el = svgEl('path', { class: s.kind === 'ghost' ? 'ghost' : 'bar', d });
@@ -890,28 +891,28 @@ function fmtProb(p) {
   if (p > 0.95) return '> 95%';
   return `${Math.round(p * 20) * 5}%`;
 }
-/* What the hero tile says. Radar first, including the slot we are in. After the radar window: the first model
-   hour with real rain (≥ 0,2 mm; 0,1 mm is a trace) that the ensemble also gives ≥ 30 % — an hour the
-   radar half covers counts from where the radar stops. Otherwise dry up to 48 h, with the highest chance. */
-const RAIN_MM = 0.2, RAIN_PROB = 0.3;
+/* What the hero tile says. Radar first, including the slot we are in. After the radar window: the first hour bar
+   of HARMONIE with at least 0,5 mm — deterministic only; the ensemble chance is shown alongside but decides
+   nothing. An hour the radar half covers counts from where the radar stops. Otherwise dry up to 48 h, with the
+   wettest hour below the threshold when there is one. */
+const RAIN_MM = 0.5;
 function nextRain(nowcast, H, ens, now = new Date()) {
   const slot = nowcast && nowcast.find(p => p.v >= 0.1 && p.t.getTime() + MIN5 > now.getTime());
   if (slot) return { kind: 'radar', t: slot.t, now: slot.t <= now, mmh: slot.v };
   const radarEnd = nowcast && nowcast.length ? nowcast[nowcast.length - 1].t.getTime() + MIN5 : null;
-  if (!H || !H.applicable || !H.interval.length) return radarEnd ? { kind: 'dry', until: new Date(radarEnd), maxP: null } : null;
+  if (!H || !H.applicable || !H.interval.length) return radarEnd ? { kind: 'dry', until: new Date(radarEnd), maxMm: null } : null;
   const from = radarEnd || now.getTime();
   const end = Math.min(H.instant[0].t.getTime() + HORIZON_MAX * HOUR, H.interval[H.interval.length - 1].tEnd.getTime());
-  const probOf = p => { const r = ens && ens.prob.find(q => q.t.getTime() === p.t.getTime()); return r ? r.v : null; };
-  let maxP = null, maxT = null;
+  const probOf = p => { const r = ens && p.src !== 'radar' && ens.prob.find(q => q.t.getTime() === p.t.getTime()); return r ? r.v : null; };
+  let maxMm = null, maxT = null;
   for (const p of H.interval) {
     if (p.tEnd.getTime() <= from || p.t.getTime() >= end) continue;
-    const pr = probOf(p);
-    if (pr != null && (maxP == null || pr > maxP)) { maxP = pr; maxT = p.t; }
-    if (p.precipitation >= RAIN_MM && (pr == null || pr >= RAIN_PROB)) {
-      return { kind: 'model', t: new Date(Math.max(p.t.getTime(), radarEnd || 0)), mm: p.precipitation, prob: pr };
+    if (p.precipitation >= RAIN_MM) {
+      return { kind: 'model', t: new Date(Math.max(p.t.getTime(), radarEnd || 0)), mm: p.precipitation, prob: probOf(p) };
     }
+    if (p.precipitation >= 0.1 && (maxMm == null || p.precipitation > maxMm)) { maxMm = p.precipitation; maxT = p.t; }
   }
-  return { kind: 'dry', until: new Date(end), maxP, maxT };
+  return { kind: 'dry', until: new Date(end), maxMm, maxT };
 }
 const geoUrl = q => `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=8&language=nl&format=json`;
 
@@ -925,7 +926,9 @@ async function fetchOk(url, asText) {
    The service worker no longer caches data: without network the app falls back on these copies and says
    how old they are, instead of showing old data under a fresh "bijgewerkt". */
 const STORE_PREFIX = 'regen.data.';
-const MAX_AGE = { nowcast: 2 * HOUR, forecast: 24 * HOUR, ens: 24 * HOUR, obs: 2 * HOUR }; // oudste bewaarde kopie die nog getoond wordt
+// oudste bewaarde kopie die nog getoond wordt. Radar maar 30 min: van een oudere nowcast blijft na het weglaten van
+// wat voorbij is een stompje over, en dan komt de uurgrafiek grotendeels uit het model terwijl "Komende 2 uur" droog lijkt
+const MAX_AGE = { nowcast: 30 * 60e3, forecast: 24 * HOUR, ens: 24 * HOUR, obs: 2 * HOUR };
 const OBS_MAX_AGE = HOUR; // een meting van meer dan een uur geleden is geen "nu" meer
 const sameLoc = (a, b) => !b || (a && Math.abs(a.lat - b.lat) < 1e-4 && Math.abs(a.lon - b.lon) < 1e-4);
 function storeSave(key, loc, body, at) {
@@ -961,14 +964,19 @@ function blendRain(interval, nowcast) {
   const r0 = nowcast[0].t.getTime(), r1 = nowcast[nowcast.length - 1].t.getTime() + MIN5;
   return interval.map(p => {
     const a = p.t.getTime(), b = p.tEnd.getTime();
-    if (b <= r0 || a >= r1) return p;
-    let mm = 0;
-    for (const s of nowcast) { const st = s.t.getTime(); if (st >= a && st < b) mm += s.v / 12; }
+    // hours after the radar keep the model; an hour ending before the radar starts is the current hour, whose
+    // last minutes the radar (starting at about now) does not reach: it is over, not the model's
+    if (a >= r1) return p;
+    let radar = 0;
+    for (const s of nowcast) { const st = s.t.getTime(); if (st >= a && st < b) radar += s.v / 12; }
     const after = Math.max(0, b - Math.max(a, r1));
-    mm += (p.precipitation || 0) * after / HOUR;
-    mm = Math.round(mm * 100) / 100;
-    // below 0,05 mm a bar would be a hairline that reads as rain while the label says 0,0: show it as dry
-    return { ...p, precipitation: mm < 0.05 ? 0 : mm, src: after > 0 ? 'mix' : 'radar', model: p.precipitation };
+    // the model's share for the few minutes after the radar is dropped below 0,05 mm (a trace that would read as
+    // rain the radar doesn't show); rain the radar shows always stays, however little, so both charts agree
+    let model = (p.precipitation || 0) * after / HOUR;
+    if (model < 0.05) model = 0;
+    let mm = Math.round((radar + model) * 100) / 100;
+    if (radar > 0 && mm < 0.01) mm = 0.01;
+    return { ...p, precipitation: mm, src: after > 0 ? 'mix' : 'radar', model: p.precipitation };
   });
 }
 /* chance of rain for an hour bar; none for an hour the radar fully covers (the radar has no chance) */
@@ -1021,8 +1029,10 @@ async function load() {
   state.updated = now;
   document.body.classList.remove('loading');
   render();
+  // on a phone the first request after waking often fails; then try again soon instead of in 5 minutes
+  const failed = Object.keys(state.errors).length || Object.values(state.fetched).some(f => f.stored);
   clearTimeout(refreshTimer);
-  refreshTimer = setTimeout(load, 5 * 60e3);
+  refreshTimer = setTimeout(load, failed ? 30e3 : 5 * 60e3);
 }
 
 /* ======================================================================
@@ -1211,8 +1221,9 @@ function renderRain(c) {
     hint.textContent = `${fmtMm(nr.mm)} mm in dat uur${nr.prob != null ? ` · kans ${fmtProb(nr.prob)}` : ''}`;
   } else {
     big.textContent = 'Droog';
-    const chance = nr.maxP == null ? '' : nr.maxP < 0.05 ? ' · kans < 5%' : ` · hoogste kans ${fmtProb(nr.maxP)} ${fmtDayTime(nr.maxT)}`;
-    hint.textContent = `geen regen verwacht t/m ${fmtDayTime(nr.until)}${chance}`;
+    // below the threshold there may still be a little: say so, so the hour bars below don't look like a contradiction
+    hint.textContent = nr.maxMm == null ? `geen regen verwacht t/m ${fmtDayTime(nr.until)}`
+      : `geen regen van betekenis t/m ${fmtDayTime(nr.until)} · hooguit ${fmtMm(nr.maxMm)} mm ${fmtDayTime(nr.maxT)}`;
   }
   ht.appendChild(big); ht.appendChild(hint); hero.appendChild(ht);
   c.appendChild(hero);
@@ -1226,7 +1237,7 @@ function renderRain(c) {
     drawChart(k1.body, { sky: skyOf(),
       tMin, tMax, now, unit: 'mm/u', unitTip: 'mm/u', ticks: 'nowcast', yOpts: { zero: true, minSpan: 1, headroom: 1.15 },
       series: [{ kind: 'bar', name: 'Radar', color: 'var(--s1)', points: pts }],
-      fmt: fmtMm, directLabels: 'peak', emptyText: 'Droog in de komende 2 uur', tipTime: p => `${fmtTime(p.t)}–${fmtTime(p.tEnd)}`,
+      fmt: fmtMm, directLabels: 'peak', emptyText: tMax - now >= 110 * 60e3 ? 'Droog in de komende 2 uur' : `Droog tot ${fmtTime(tMax)}`, tipTime: p => `${fmtTime(p.t)}–${fmtTime(p.tEnd)}`,
       aria: 'Neerslagintensiteit per 5 minuten voor de komende 2 uur',
     });
     k1.tableHost.appendChild(dataTable(pts, [{ label: 'Tijd', get: p => fmtTime(p.t) }, { label: 'mm/u', num: true, get: p => fmtNum(p.v, 2) }]));
@@ -1243,7 +1254,7 @@ function renderRain(c) {
   const modelPts = m => m.interval.map(p => ({ t: p.t, tEnd: p.tEnd, v: p.precipitation, rain: p.rain, snow: p.snowfall, src: p.src }));
   const SRC_NOTE = { radar: ' · radar', mix: ' · radar en verwachting' };
   drawChart(k2.body, { sky: skyOf(),
-    ...spanFor([H]), unit: 'mm/u', unitTip: 'mm', ticks: 'days', now, yOpts: { zero: true, minSpan: 1, headroom: 1.15 },
+    ...spanFor([H]), unit: 'mm', unitTip: 'mm', ticks: 'days', now, yOpts: { zero: true, minSpan: 1, headroom: 1.15 },
     series: [{ kind: 'bar', name: 'Neerslag', color: 'var(--s1)', points: modelPts(H) }], fmt: fmtMm, directLabels: 'peak', group: 'rain',
     tipTime: p => `${fmtWd(p.t)} ${fmtHourRange(p.t)}`,
     tipNote: (s, p) => { const pr = probFor(p); return (SRC_NOTE[p.src] || '') + (pr != null ? ` · kans ${fmtProb(pr)}` : '') + (p.snow > 0 ? ` · sneeuw ${fmtNum(p.snow, 1)} cm` : ''); },
@@ -1600,8 +1611,8 @@ function renderInfo(c) {
     '<b>Verwachting per uur</b> (neerslag, wind, bewolking): het KNMI-weermodel HARMONIE-AROME, dat elk uur opnieuw rekent op een raster van 2 bij 2 km. In een eigen verificatie tegen KNMI-metingen bleek dit model voor regen op 1 tot 2 dagen vooruit het beste van de fijnmazige modellen.',
     '<b>Temperatuur</b>: het model ICON-D2 van de Duitse weerdienst (2,2 km). In dezelfde verificatie zat HARMONIE gemiddeld een halve graad te warm en zat ICON-D2 er duidelijk dichter bij.',
     '<b>Kans op regen</b> en de <b>onzekerheidsband</b>: het ensemble ICON-D2-EPS van de Duitse weerdienst, twintig berekeningen met kleine verschillen in de beginsituatie. De kans is het aandeel berekeningen met minstens 0,1 mm in dat uur; met twintig berekeningen gaat die in stappen van 5%, dus "< 5%" betekent: geen van de twintig. De band toont waar 80% van de berekeningen zit. Bij temperatuur hoort de band bij hetzelfde model als de lijn; bij neerslag en wind komt hij voorlopig van een ander model dan de verwachting, waardoor ze elkaar soms tegenspreken.',
-    '<b>Eerstvolgende neerslag</b> volgt eerst de radar. Daarna telt een uur als nat als het model minstens 0,2 mm geeft én het ensemble een kans van minstens 30%. Anders staat er "Droog", met de hoogste kans in de komende 48 uur.',
-    '<b>Zonder verbinding</b> toont de app de laatst opgehaalde gegevens met het tijdstip waarop ze zijn opgehaald. Radar die al voorbij is en metingen van meer dan een uur oud worden dan niet meer getoond.',
+    '<b>Eerstvolgende neerslag</b> volgt eerst de radar. Daarna telt een uur als nat als het KNMI-model minstens 0,5 mm geeft; de kans van het ensemble staat erbij maar beslist niet. Anders staat er "Droog", met het natste uur eronder als dat er is.',
+    '<b>Zonder verbinding</b> toont de app de laatst opgehaalde gegevens met het tijdstip waarop ze zijn opgehaald. Radar van meer dan een half uur oud, radar die al voorbij is en metingen van meer dan een uur oud worden dan niet meer getoond.',
     'Modeldata loopt via <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a>. Zonsopkomst, schemer en zonshoogte worden in de app zelf berekend.',
   ]);
   sec('Hoe je de grafieken leest', [
@@ -2168,15 +2179,17 @@ function runTests() {
     const r = nextRain(mkNc(ncFrom, 24), H, mkEns({ 22: 0.5 }), NOW);
     eq(r.kind, 'model'); eq(r.t.getHours(), 22); eq(r.t.getMinutes(), 15);
   });
-  test('eerstvolgende neerslag: spoortjes (0,1 mm) en lage kans (< 30%) zijn droog, met de hoogste kans erbij', () => {
-    const H = mkH(p => { p[24] = 0.1; p[27] = 2.0; }); // 23–24 spoortjes, 02–03 veel maar onwaarschijnlijk
-    const ens = { prob: [...mkEns({ 23: 0.2 }).prob, { t: new Date(2026, 10, 1, 2), tEnd: new Date(2026, 10, 1, 3), v: 0.1 }] };
-    const r = nextRain(mkNc(ncFrom, 24), H, ens, NOW);
-    eq(r.kind, 'dry'); near(r.maxP, 0.2, 1e-9); eq(r.maxT.getHours(), 23);
+  test('eerstvolgende neerslag: onder 0,5 mm is droog, met het natste uur erbij', () => {
+    const H = mkH(p => { p[24] = 0.3; p[25] = 0.1; }); // 23–24 en 00–01 te weinig
+    const r = nextRain(mkNc(ncFrom, 24), H, mkEns({ 23: 0.9 }), NOW);
+    eq(r.kind, 'dry', 'hoge kans maakt het niet nat'); near(r.maxMm, 0.3, 1e-9); eq(r.maxT.getHours(), 23);
     eq((r.until - H.instant[0].t) / HOUR, 48, 'droog t/m 48 uur vooruit');
+    eq(nextRain(null, mkH(() => {}), null, NOW).maxMm, null, 'helemaal droog: geen natste uur');
   });
-  test('eerstvolgende neerslag: zonder ensemble beslist 0,2 mm; regen na 48 uur telt niet', () => {
-    let r = nextRain(null, mkH(p => { p[30] = 0.3; }), null, NOW);
+  test('eerstvolgende neerslag: alleen HARMONIE beslist, ook bij een lage kans; regen na 48 uur telt niet', () => {
+    let r = nextRain(null, mkH(p => { p[27] = 2.0; }), { prob: [{ t: new Date(2026, 10, 1, 2), tEnd: new Date(2026, 10, 1, 3), v: 0.1 }] }, NOW);
+    eq(r.kind, 'model', 'kans 10% maar 2 mm: nat'); eq(r.t.getHours(), 2); eq(r.prob, 0.1, 'kans wel getoond');
+    r = nextRain(null, mkH(p => { p[30] = 0.5; }), null, NOW);
     eq(r.kind, 'model'); eq(r.prob, null); eq(r.t.getHours(), 5);
     r = nextRain(null, mkH(p => { p[21 + 50] = 5; }), null, NOW);
     eq(r.kind, 'dry');
@@ -2191,8 +2204,13 @@ function runTests() {
     near(b[2].precipitation, 0.75, 1e-9, '22–23: radar droog tot 22:15, daarna 45 min model'); eq(b[2].src, 'mix');
     eq(b[3].precipitation, 1, '23–24 alleen model'); eq(b[3].src, undefined);
     eq(blendRain(H.interval, null), H.interval, 'zonder radar ongewijzigd');
+    const c = blendRain(mkH(p => { p[21] = 2; }).interval, mkNc(new Date(2026, 9, 31, 21, 0), 24)); // radar begint op het hele uur
+    eq(c[0].precipitation, 0, 'lopend uur 20–21 vóór de radar: niet het model'); eq(c[0].src, 'radar');
     const t = blendRain(mkH(p => { p[23] = 0.1; }).interval, mkNc(new Date(2026, 9, 31, 20, 15), 32)); // radar tot 22:55
     eq(t[2].precipitation, 0, '5 min van 0,1 mm = 0,008 mm: droog'); eq(t[2].src, 'mix');
+    const d = blendRain(mkH(() => {}).interval, mkNc(ncFrom, 24, { 16: 0.1, 18: 0.1, 19: 0.1 })); // 21:35–21:55 lichte radarregen
+    near(d[1].precipitation, 0.03, 1e-9, 'radarregen van 0,025 mm blijft staan'); ok(d[1].precipitation > 0);
+    eq(fmtMm(0.03), '< 0,1'); eq(fmtMm(0), '0,0'); eq(fmtMm(0.3), '0,3');
     eq(probFor(b[0]), null, 'geen kans voor een radaruur');
   });
   test('windveld: niets bij 0 Bft, genoeg vage streken voor de richting bij 1 Bft, dik en snel vanaf 7 Bft', () => {
@@ -2227,7 +2245,7 @@ function runTests() {
       const s = storeLoad('nowcast', { lat: 52.37, lon: 4.9 }, new Date(2026, 9, 31, 20, 30));
       ok(s && s.body === 'tekst' && s.at.getTime() === at.getTime(), 'zelfde plaats');
       eq(storeLoad('nowcast', { lat: 51.44, lon: 5.48 }, new Date(2026, 9, 31, 20, 30)), null, 'andere plaats');
-      eq(storeLoad('nowcast', { lat: 52.37, lon: 4.9 }, new Date(2026, 9, 31, 23, 0)), null, 'ouder dan 2 uur');
+      eq(storeLoad('nowcast', { lat: 52.37, lon: 4.9 }, new Date(2026, 9, 31, 20, 31)), null, 'radar ouder dan 30 min');
     } finally { try { if (saved == null) localStorage.removeItem(key); else localStorage.setItem(key, saved); } catch (e) {} }
   });
   test('verouderd-melding: een kopie van een paar minuten telt als actueel; alles of deels', () => {

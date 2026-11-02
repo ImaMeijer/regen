@@ -10,7 +10,7 @@ Smartphone-prototype van een buienapp op basis van fijnmazige weermodellen. Drie
 
 Open `index.html` via een lokale webserver (bijvoorbeeld `..\buienalarm\serve.ps1 -Root .. -Port 8765` en dan `http://localhost:8765/regenapp/`). Rechtstreeks openen als bestand werkt in Chrome ook, omdat beide API's externe aanroepen toestaan.
 
-Zelftests: `index.html?test=1` toont een paneel met alle zelftests (56 bij versie 13). Donker thema forceren: `?theme=dark`.
+Zelftests: `index.html?test=1` toont een paneel met alle zelftests (56 bij versie 14). Donker thema forceren: `?theme=dark`.
 
 ## Databronnen
 
@@ -143,3 +143,14 @@ Eerste ronde verbeteringen na de audit van 1 november 2026.
 - **Verouderd-melding:** een bewaarde kopie van minder dan 10 minuten oud telt als actueel, zodat één haperende bron geen alarm geeft. Faalt alles, dan staat er "Geen verbinding"; faalt een deel, dan "Niet alles kon worden bijgewerkt".
 - **Dagstrook gelijkgetrokken:** op alle tabbladen staan de dagnamen op dezelfde hoogte (14 px) met direct daaronder één rij: de weericoontjes in Overzicht, de zonnetjes bij op- en ondergang op de andere tabbladen (32 px), en de grafiek begint op 46 px. In Overzicht scheelt dat 20 px lege ruimte; daar is de temperatuurgrafiek bovendien 240 px hoog in plaats van 210, waardoor het plotvlak groeit van 58 naar 108 px.
 - Zelftests: 56.
+
+## Versie 14: kop alleen op HARMONIE, geen oude radar meer
+
+- **Eerstvolgende neerslag** beslist alleen nog op HARMONIE: na het radarvenster is het eerste uur met minstens 0,5 mm de eerstvolgende neerslag (gemeten aan de staaf zoals je die in de uurgrafiek ziet). De ensemblekans staat er nog bij, maar beslist niet meer. Voorheen kon een lage ICON-kans een duidelijk nat HARMONIE-uur wegfilteren, waardoor er "Droog" stond boven een grafiek met regen. Onder de drempel staat er "geen regen van betekenis … · hooguit x mm" met het natste uur.
+- **Geen oude radar meer:** een bewaarde radarkopie wordt nog maar tot 30 minuten oud gebruikt (was 2 uur). Bij het heropenen van de app op de telefoon faalde soms de eerste aanroep; dan bleef van een oude kopie na het weglaten van wat voorbij was een stompje van een kwartier over, en kwam het uur daarna in de uurgrafiek grotendeels uit HARMONIE terwijl "Komende 2 uur" droog leek.
+- **Snel opnieuw proberen:** faalt een bron, dan probeert de app het na 30 seconden opnieuw in plaats van na 5 minuten.
+- **Tekst bij een korte radarreeks:** "Droog tot 20:15" in plaats van "Droog in de komende 2 uur" als de radar minder dan ongeveer 2 uur dekt.
+- **Lopend uur vóór de radar:** begint de radar precies op het hele uur, dan hield het lopende uur eerst de volle HARMONIE-waarde. Nu telt dat uur als voorbij (0, bron radar).
+- **As van de uurgrafiek** heet nu "mm" in plaats van "mm/u": de staven zijn hoeveelheden per uur, de radar toont intensiteit. Een bui van een kwartier van 0,4 mm/u is in de uurgrafiek 0,1 mm.
+- **Radarregen nooit weg:** de drempel van 0,05 mm geldt alleen nog voor het modeldeel na de radar; regen die de radar toont blijft in de uurstaaf staan, hoe weinig ook. Elke staaf groter dan 0 is minstens 2 px hoog, en hoeveelheden onder 0,05 mm heten "< 0,1" in plaats van "0,0".
+- Zelftests: 56 (twee kop-tests herschreven voor de nieuwe regel).
