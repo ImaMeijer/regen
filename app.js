@@ -19,8 +19,9 @@ const PRIMARY = MODELS[0];
 const TEMP_MODEL = MODELS[1];
 const VARS = ['precipitation', 'rain', 'snowfall', 'temperature_2m', 'apparent_temperature',
   'wind_speed_10m', 'wind_direction_10m', 'wind_gusts_10m',
-  'cloud_cover', 'cloud_cover_low', 'cloud_cover_mid', 'cloud_cover_high', 'weather_code'];
-const INTERVAL_VARS = new Set(['precipitation', 'rain', 'snowfall']); // value at t = sum over (t-1h, t]
+  'cloud_cover', 'cloud_cover_low', 'cloud_cover_mid', 'cloud_cover_high', 'weather_code', 'shortwave_radiation'];
+const INTERVAL_VARS = new Set(['precipitation', 'rain', 'snowfall', 'shortwave_radiation']); // value at t = sum or mean over (t-1h, t]
+const CLOUD_VARS = new Set(['cloud_cover', 'cloud_cover_low', 'cloud_cover_mid', 'cloud_cover_high']);
 const COMPARE_HOURS = 48;
 
 const $ = id => document.getElementById(id);
@@ -79,6 +80,15 @@ function deriveCloudTotal(low, mid, high) {
   if ([low, mid, high].some(x => x == null)) return null;
   const f = x => 1 - clamp(x, 0, 100) / 100;
   return Math.round((1 - f(low) * f(mid) * f(high)) * 100);
+}
+
+/* HARMONIE's cloud cover is a snapshot of one 2 km cell on the hour: with scattered cumulus it flips between
+   0 and 100 %. A 1-2-1 weighted mean over the neighbouring hours turns that flicker into a fraction. */
+function smoothAt(a, i) {
+  if (a[i] == null) return null;
+  let s = 0, w = 0;
+  for (const [j, wj] of [[i - 1, 1], [i, 2], [i + 1, 1]]) if (j >= 0 && j < a.length && a[j] != null) { s += a[j] * wj; w += wj; }
+  return Math.round(s / w);
 }
 
 function beaufort(kmh) {
@@ -148,6 +158,25 @@ function sunPhase(alt) {
   if (alt >= SUN_NAUTICAL) return 'nautische schemer';
   if (alt >= SUN_ASTRO) return 'astronomische schemer';
   return 'nacht';
+}
+/* Clear-sky global radiation (Haurwitz) as a mean over [t0, t1] in W/m², with the mean sine of the sun's altitude. */
+function clearSky(t0, t1, lat, lon) {
+  const n = 6; let g = 0, s = 0;
+  for (let k = 0; k < n; k++) {
+    const sa = Math.sin(rad(sunAltitude(new Date(t0.getTime() + (k + 0.5) * (t1 - t0) / n), lat, lon)));
+    if (sa > 0) { g += 1098 * sa * Math.exp(-0.057 / sa); s += sa; }
+  }
+  return { ghi: g / n, sin: s / n };
+}
+/* Sky cover as felt on the ground (%), from the model's own sunshine over the hour against a clear sky.
+   An hourly mean does not flip with one passing cloud. Satellite checks put a clear sky at ≈ 0,9 of
+   Haurwitz, so 0,9 → 0 % and 0,3 → 100 %. Below ~6° sun the ratio gets noisy: null, use cloud cover. */
+const SKY_MIN_SIN = 0.1;
+function skyFromSun(sw, t0, t1, lat, lon) {
+  if (sw == null || lat == null || lon == null) return null;
+  const c = clearSky(t0, t1, lat, lon);
+  if (c.sin < SKY_MIN_SIN) return null;
+  return Math.round(clamp((0.9 - sw / c.ghi) / 0.6, 0, 1) * 100);
 }
 /* Sky tint as a function of sun altitude: day above +8°, golden around the horizon, darkening through civil
    and nautical twilight, full night below −18°. Returns [r,g,b] mixed from the theme's sky tokens. */
@@ -247,7 +276,7 @@ function parseForecast(json, now = new Date()) {
     const instant = [];
     for (let i = i0; i < end; i++) {
       const row = { t: times[i] };
-      for (const v of VARS) if (!INTERVAL_VARS.has(v)) { const a = get(v); row[v] = a ? a[i] : null; }
+      for (const v of VARS) if (!INTERVAL_VARS.has(v)) { const a = get(v); row[v] = a ? (CLOUD_VARS.has(v) ? smoothAt(a, i) : a[i]) : null; }
       if (row.cloud_cover == null) {
         row.cloud_cover = deriveCloudTotal(row.cloud_cover_low, row.cloud_cover_mid, row.cloud_cover_high);
         row.cloud_derived = row.cloud_cover != null;
@@ -260,6 +289,7 @@ function parseForecast(json, now = new Date()) {
       const row = { t: times[i - 1], tEnd: times[i] };
       for (const v of INTERVAL_VARS) { const a = get(v); row[v] = a ? a[i] : null; }
       if (row.precipitation == null) continue;
+      row.sky = skyFromSun(row.shortwave_radiation, row.t, row.tEnd, json.latitude, json.longitude);
       interval.push(row);
     }
     models[m.key] = { ...m, applicable, hours, instant, interval,
@@ -1079,7 +1109,10 @@ function staleNote({ since, all }) {
   return n;
 }
 
-/* Weather at an instant, from HARMONIE: cloud cover of the nearest hour and precipitation of the hour containing t. */
+/* Sky cover for an hour: by day from the sunshine in that hour, otherwise the (smoothed) cloud cover. */
+const coverOf = (iv, row) => (iv && iv.sky != null ? iv.sky : row.cloud_cover);
+/* Weather at an instant, from HARMONIE: sky cover and precipitation of the hour containing t; at night or
+   low sun the cloud cover of the nearest hour. */
 function weatherAt(t) {
   const H = state.forecast && state.forecast.models.harmonie;
   if (!H || !H.applicable) return null;
@@ -1088,7 +1121,7 @@ function weatherAt(t) {
   for (const r of H.instant) if (!best || Math.abs(r.t.getTime() - ms) < Math.abs(best.t.getTime() - ms)) best = r;
   if (!best || Math.abs(best.t.getTime() - ms) > HOUR) return null;
   const iv = H.interval.find(p => ms >= p.t.getTime() && ms < p.tEnd.getTime());
-  return { cloud: best.cloud_cover, rain: iv ? iv.precipitation : null };
+  return { cloud: coverOf(iv, best), rain: iv ? iv.precipitation : null };
 }
 const cloudAt = t => { const w = weatherAt(t); return w && w.cloud != null ? w.cloud / 100 : null; };
 const skyOf = () => ({ lat: state.loc.lat, lon: state.loc.lon, weatherAt, cloudAt });
@@ -1116,8 +1149,36 @@ function parseObs(json, lat, lon) {
     station: String(s.stationname || '').replace(/^Meetstation\s+/i, ''), dist: best.dist, time: new Date(s.timestamp),
     temp: s.temperature, feel: s.feeltemperature, humidity: s.humidity, pressure: s.airpressure,
     wind: s.windspeed != null ? s.windspeed * 3.6 : null, gust: s.windgusts != null ? s.windgusts * 3.6 : null, dir: s.winddirectiondegrees,
-    desc: s.weatherdescription,
+    desc: s.weatherdescription, sky: obsSky(list, lat, lon),
   };
+}
+/* Sky cover now from the stations around (%): each station's 10-minute sunshine against a clear sky, weighted
+   by 1/distance within OBS_SKY_KM. A 10-minute mean over several stations rides out a single passing cumulus,
+   where the station's own wording does not (Schiphol, 2 nov 13:30: "zwaar bewolkt" at 1,2× a clear sky).
+   null at night, at low sun or without stations in reach. */
+const OBS_SKY_KM = 40;
+function obsSky(list, lat, lon) {
+  let s = 0, w = 0;
+  for (const st of list) {
+    if (st.sunpower == null || !st.timestamp || !Number.isFinite(st.lat) || !Number.isFinite(st.lon)) continue;
+    const d = haversineKm(lat, lon, st.lat, st.lon);
+    if (d > OBS_SKY_KM) continue;
+    const t1 = new Date(st.timestamp);
+    const sky = skyFromSun(st.sunpower, new Date(t1.getTime() - 10 * 60e3), t1, st.lat, st.lon);
+    if (sky == null) continue;
+    const wi = 1 / Math.max(d, 5);
+    s += sky * wi; w += wi;
+  }
+  return w ? Math.round(s / w) : null;
+}
+/* Buienradar's station wording → icon kind; null when it says nothing usable. */
+function descKind(desc) {
+  const s = String(desc || '').toLowerCase();
+  if (/regen|bui|sneeuw|hagel|onweer/.test(s)) return 'rain';
+  if (/onbewolkt|zonnig|helder/.test(s)) return 'clear';
+  if (/opklaring|half bewolkt|licht bewolkt/.test(s)) return 'partly';
+  if (/bewolkt|mist|nevel/.test(s)) return 'cloud';
+  return null;
 }
 function renderSunline() {
   const el = $('sunline');
@@ -1360,17 +1421,27 @@ function todayRange(m) {
 function hourIcons(H) {
   return H.instant.map(r => {
     const iv = H.interval.find(p => p.t.getTime() === r.t.getTime());
-    const kind = sunWeatherKind({ cloud: r.cloud_cover, rain: iv ? iv.precipitation : null });
+    const kind = sunWeatherKind({ cloud: coverOf(iv, r), rain: iv ? iv.precipitation : null });
     const mid = new Date(r.t.getTime() + HOUR / 2);
     return { t: mid, kind, night: sunAltitude(mid, state.loc.lat, state.loc.lon) < SUN_RISESET, hour: r.t };
   });
+}
+/* Weather of this moment for the tile: what the stations around measure, the model only without a reading.
+   Rain comes from the station's wording or the current hour, which already holds the radar. */
+function nowKind(now) {
+  const w = weatherAt(now), o = state.obs;
+  if (!o) return sunWeatherKind(w);
+  const dk = descKind(o.desc);
+  if (dk === 'rain' || (w && w.rain != null && w.rain >= 0.1)) return 'rain';
+  if (o.sky != null) return sunWeatherKind({ cloud: o.sky, rain: null });
+  return dk || sunWeatherKind(w);
 }
 function renderOverview(c) {
   const H = needHarmonie(c); if (!H) return;
   const now = new Date();
   const T = tempModel();
   const o = state.obs, r0 = T.instant[0];
-  const kind0 = sunWeatherKind(weatherAt(now));
+  const kind0 = nowKind(now);
   const night0 = sunAltitude(now, state.loc.lat, state.loc.lon) < SUN_RISESET;
   const word0 = kind0 === 'clear' && night0 ? 'helder' : ICON_WORDS[kind0];
   const { mn, mx } = todayRange(T);
@@ -1604,9 +1675,11 @@ function renderInfo(c) {
     'De app toont de verwachting voor de komende 48 uur voor de gekozen plaats. <b>Regen</b> begint met de radar voor de komende 2 uur (per 5 minuten) en daaronder de neerslag per uur met de kans op regen. <b>Overzicht</b> zet temperatuur en weerbeeld per uur naast elkaar. <b>Temperatuur</b>, <b>Wind</b> en <b>Bewolking</b> tonen elk hun eigen verloop.',
     'Zoomen: knijp met twee vingers op een grafiek, of kies 12, 24 of 48 uur. De grafiek begint altijd bij nu; de keuze wordt onthouden. Sleep met één vinger over een grafiek om de waarden van dat moment te zien; de stippellijn volgt je vinger.',
     'De achtergrond van elke grafiek volgt de zon: warm bij daglicht, grijzer naarmate er meer bewolking is, donker in de nacht, met schemer ertussen. De zonnetjes boven de grafiek staan op zonsopkomst en -ondergang en tonen het weerbeeld van dat moment.',
+    'Het <b>weerbeeld</b> (zonnig, half bewolkt, bewolkt) komt overdag uit hoeveel zon het KNMI-model in dat uur laat binnenkomen, vergeleken met een heldere hemel. Zo telt een uur met volop zon en een enkel wolkje als zonnig. Bij lage zon en \'s nachts beslist de bewolking.',
   ]);
   sec('Waar de cijfers vandaan komen', [
     '<b>Nu-waarden</b> (temperatuur, wind) zijn echte metingen van het dichtstbijzijnde KNMI-weerstation, elke 10 minuten bijgewerkt, via de feed van Buienradar. De tegel noemt het station en de afstand.',
+    'Het <b>weerbeeld van nu</b> in de tegel komt ook uit metingen: overdag uit hoeveel zon de KNMI-stations binnen 40 km de afgelopen 10 minuten kregen, vergeleken met een heldere hemel, waarbij dichterbij zwaarder telt. Eén wolkje boven één station maakt het dan nog niet bewolkt. Bij lage zon en \'s nachts telt de omschrijving van het dichtstbijzijnde station, en zonder meting het model.',
     '<b>Radar</b> voor de komende 2 uur: Buienradar-nowcast, een verplaatsing van het actuele radarbeeld.',
     '<b>Verwachting per uur</b> (neerslag, wind, bewolking): het KNMI-weermodel HARMONIE-AROME, dat elk uur opnieuw rekent op een raster van 2 bij 2 km. In een eigen verificatie tegen KNMI-metingen bleek dit model voor regen op 1 tot 2 dagen vooruit het beste van de fijnmazige modellen.',
     '<b>Temperatuur</b>: het model ICON-D2 van de Duitse weerdienst (2,2 km). In dezelfde verificatie zat HARMONIE gemiddeld een halve graad te warm en zat ICON-D2 er duidelijk dichter bij.',
@@ -1618,7 +1691,7 @@ function renderInfo(c) {
   sec('Hoe je de grafieken leest', [
     'Een <b>neerslagstaaf</b> is de som over dat uur; de radarstaven zijn de intensiteit op dat moment, in millimeter per uur. De uren die de radar dekt (ongeveer de eerste twee) komen ook in de uurgrafiek uit de radar, zodat beide grafieken hetzelfde zeggen; voor die uren staat er geen kans. Van het lopende uur telt alleen wat nog komt. Lichte regen is 0,1 tot 1 mm per uur, matige regen 1 tot 4, zware regen meer dan 4.',
     '<b>Windpijlen</b> wijzen waarheen de wind waait; in de tekst staat waar de wind vandaan komt, zoals gebruikelijk. Beaufort volgt uit de uursnelheid volgens de KNMI-tabel; de boom laat zien wat die kracht met een boom doet.',
-    '<b>Bewolking</b> is het deel van de hemel dat bedekt is. De lijn wordt donkerder grijs naarmate er meer bewolking is.',
+    '<b>Bewolking</b> is het deel van de hemel dat bedekt is. De lijn wordt donkerder grijs naarmate er meer bewolking is. Het model geeft per uur een momentopname van één vakje van 2 km, die bij losse wolken tussen 0 en 100% springt; de app middelt daarom elk uur met het uur ervoor en erna.',
   ]);
   sec('Beaufort volgens KNMI', [
     '<table class="bft">' + BEAUFORT.map((b, i) => `<tr><td class="num">${i}</td><td>${b[0]}</td><td>${b[1]}</td></tr>`).join('') + '</table>',
@@ -2017,9 +2090,39 @@ function runTests() {
     try {
       state.forecast = parseForecast(mkJson(undefined, hh => { hh['precipitation_knmi_harmonie_arome_netherlands'][23] = 1.2; hh['cloud_cover_knmi_harmonie_arome_netherlands'][22] = 95; }), NOW);
       const w = weatherAt(new Date(2026, 9, 31, 22, 20)); // in het uur 22–23, dichtst bij 22:00
-      eq(w.rain, 1.2, 'neerslag van uur 22–23 (waarde bij 23:00)'); eq(w.cloud, 95, 'bewolking om 22:00');
+      eq(w.rain, 1.2, 'neerslag van uur 22–23 (waarde bij 23:00)'); eq(w.cloud, 68, 'bewolking om 22:00, gemiddeld met 21:00 en 23:00');
       eq(weatherAt(new Date(2030, 0, 1)), null, 'buiten bereik');
     } finally { state.forecast = saved; }
+  });
+  test('bewolking gladgemaakt: 0/100/0 → 50, rand weegt alleen bestaande buren, null blijft null', () => {
+    eq(smoothAt([0, 100, 0], 1), 50); eq(smoothAt([100, 0, 100], 1), 50); eq(smoothAt([0, 100], 0), 33); eq(smoothAt([40, null, 40], 1), null); eq(smoothAt([null, 60, 30], 1), 50);
+  });
+  test('zon %: heldere hemel → 0 %, weinig zon → 100 %, nacht en lage zon → null', () => {
+    const t0 = new Date(2026, 10, 2, 12), t1 = new Date(2026, 10, 2, 13), cs = clearSky(t0, t1, 52.37, 4.9);
+    ok(cs.ghi > 300 && cs.ghi < 420, 'heldere hemel 2 nov 12–13 u, kreeg ' + cs.ghi);
+    eq(skyFromSun(0.9 * cs.ghi, t0, t1, 52.37, 4.9), 0); eq(skyFromSun(cs.ghi * 1.1, t0, t1, 52.37, 4.9), 0, 'meer dan helder');
+    eq(skyFromSun(0.3 * cs.ghi, t0, t1, 52.37, 4.9), 100); eq(skyFromSun(0.6 * cs.ghi, t0, t1, 52.37, 4.9), 50);
+    eq(skyFromSun(0, new Date(2026, 10, 2, 22), new Date(2026, 10, 2, 23), 52.37, 4.9), null, 'nacht');
+    eq(skyFromSun(5, new Date(2026, 10, 2, 7, 30), new Date(2026, 10, 2, 8, 30), 52.37, 4.9), null, 'zon net op');
+    eq(skyFromSun(null, t0, t1, 52.37, 4.9), null); eq(skyFromSun(100, t0, t1, null, null), null);
+  });
+  test('overzicht: overdag beslist de zon, niet een losse 100 % bewolking op het hele uur', () => {
+    const saved = state.forecast, savedLoc = state.loc;
+    try {
+      // 2 nov: om 13:00 springt HARMONIE naar 100 %, maar het uur 13–14 is volop zon
+      const time = [], base = new Date(2026, 10, 2, 0);
+      for (let i = 0; i < 48; i++) { const d = new Date(base.getTime() + i * HOUR); time.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}T${String(d.getHours()).padStart(2, '0')}:00`); }
+      const hourly = { time }, id = PRIMARY.id;
+      for (const v of VARS) hourly[`${v}_${id}`] = Array(48).fill(v === 'precipitation' ? 0 : v.startsWith('cloud') ? 0 : 10);
+      hourly[`cloud_cover_${id}`][13] = 100;
+      hourly[`shortwave_radiation_${id}`][14] = 0.95 * clearSky(new Date(2026, 10, 2, 13), new Date(2026, 10, 2, 14), 52.37, 4.9).ghi;
+      state.loc = { name: 'x', lat: 52.37, lon: 4.9 };
+      state.forecast = parseForecast({ latitude: 52.37, longitude: 4.9, hourly }, new Date(2026, 10, 2, 9, 5));
+      const H = state.forecast.models.harmonie;
+      eq(H.instant.find(r => r.t.getHours() === 13).cloud_cover, 50, 'bewolking 13:00 gladgemaakt');
+      eq(hourIcons(H).find(x => x.hour.getHours() === 13).kind, 'clear', 'uur 13–14 zonnig');
+      eq(weatherAt(new Date(2026, 10, 2, 13, 10)).cloud, 0, 'weatherAt volgt de zon');
+    } finally { state.forecast = saved; state.loc = savedLoc; }
   });
   test('ensemble: kans = aandeel leden ≥ 0,1 mm; band = 10/50/90-percentiel; staaf hoort bij uur ervoor', () => {
     const time = []; const base = new Date(2026, 9, 31, 0, 0);
@@ -2058,6 +2161,34 @@ function runTests() {
     eq(o.station, 'Schiphol'); near(o.wind, 18, 1e-9); near(o.gust, 28.8, 1e-9); eq(o.temp, 9.1); eq(o.time.getHours(), 22); ok(o.dist > 10 && o.dist < 20, 'afstand ' + o.dist);
     near(haversineKm(52.1, 5.18, 52.3, 4.77), 36, 1.5, 'De Bilt–Schiphol ≈ 36 km');
     eq(parseObs({ actual: { stationmeasurements: [] } }, 52, 5), null);
+    eq(o.sky, null, 'zonder zonmetingen geen bedekking');
+  });
+  test('meting: bedekking uit de zon van stations binnen 40 km, gewogen naar afstand; nacht → null', () => {
+    const t1 = new Date(2026, 10, 2, 15), t0 = new Date(t1.getTime() - 10 * 60e3);
+    const clear = (la, lo) => clearSky(t0, t1, la, lo).ghi;
+    const st = (name, la, lo, f, ts = '2026-11-02T15:00:00') => ({ stationname: name, lat: la, lon: lo, sunpower: f * clear(la, lo), timestamp: ts });
+    const sunny = [st('Schiphol', 52.3, 4.77, 1), st('Wijk aan Zee', 52.5, 4.6, 0.95), st('Groningen', 53.13, 6.59, 0.1)];
+    eq(obsSky(sunny, 52.37, 4.90), 0, 'helder rondom, Groningen te ver');
+    eq(obsSky([st('Schiphol', 52.3, 4.77, 0.3)], 52.37, 4.90), 100, 'donker');
+    const mixed = obsSky([st('Schiphol', 52.3, 4.77, 0.3), st('Wijk aan Zee', 52.5, 4.6, 0.9)], 52.37, 4.90);
+    ok(mixed > 50 && mixed < 100, 'dichterbij weegt zwaarder, kreeg ' + mixed);
+    eq(obsSky([st('Schiphol', 52.3, 4.77, 0, '2026-11-02T22:00:00')], 52.37, 4.90), null, 'nacht');
+    eq(obsSky([{ stationname: 'IJmuiden', lat: 52.47, lon: 4.57, timestamp: '2026-11-02T15:00:00' }], 52.37, 4.90), null, 'geen zonmeting');
+  });
+  test('meting: omschrijving → weerbeeld', () => {
+    eq(descKind('Vrijwel onbewolkt (zonnig/helder)'), 'clear'); eq(descKind('Zwaar bewolkt'), 'cloud'); eq(descKind('Zwaar bewolkt en regen'), 'rain');
+    eq(descKind('Mix van opklaringen en middelbare of lage bewolking'), 'partly'); eq(descKind('Lichte buien'), 'rain'); eq(descKind(''), null); eq(descKind(undefined), null);
+  });
+  test('tegel: volgt de stations, niet het model; regen en terugval', () => {
+    const saved = state.forecast, savedObs = state.obs;
+    try {
+      state.forecast = null;
+      state.obs = { desc: 'Zwaar bewolkt', sky: 10 }; eq(nowKind(new Date()), 'clear', 'zon rondom wint van de omschrijving');
+      state.obs = { desc: 'Vrijwel onbewolkt (zonnig/helder)', sky: 85 }; eq(nowKind(new Date()), 'cloud');
+      state.obs = { desc: 'Mix van opklaringen en middelbare of lage bewolking', sky: null }; eq(nowKind(new Date()), 'partly', 'nacht: omschrijving');
+      state.obs = { desc: 'Zwaar bewolkt en regen', sky: 0 }; eq(nowKind(new Date()), 'rain');
+      state.obs = null; eq(nowKind(new Date()), 'clear', 'zonder meting en model: helder (zoals sunWeatherKind)');
+    } finally { state.forecast = saved; state.obs = savedObs; }
   });
   test('nu-label: tijd onderaan onder de streep, botsend uurlabel verdwijnt', () => {
     const host = h('div'); host.style.width = '360px'; document.body.appendChild(host);
