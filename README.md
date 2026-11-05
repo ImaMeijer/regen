@@ -60,7 +60,7 @@ Conclusies (31 oktober 2026):
 
 ## Zoomen op de tijdschaal
 
-De 2,5-daagse grafieken delen één horizon-instelling: "nu t/m x uur vooruit". Het begin staat altijd op het huidige uur; zoomen verandert alleen het einde. Instellen kan met twee vingers op een grafiek (knijpen = uitzoomen, uit elkaar = inzoomen), met ctrl+scroll of trackpad-pinch op desktop, of met de presets 12 u · 24 u · 48 u · Alles. Bereik 6 uur tot de modelhorizon. De keuze wordt in `localStorage` bewaard (`regen.horizon`) en is de volgende keer de standaard.
+De 2,5-daagse grafieken delen één horizon-instelling: "nu t/m x uur vooruit". Het begin staat altijd op het huidige uur; zoomen verandert alleen het einde. Instellen kan met twee vingers op een grafiek (knijpen = uitzoomen, uit elkaar = inzoomen) of met ctrl+scroll of trackpad-pinch op desktop. Er zijn geen knoppen meer (sinds versie 18); de kaarttitel ("Komende 24 uur") laat zien hoeveel uur je ziet. Bereik 6 uur tot de modelhorizon. De keuze wordt in `localStorage` bewaard (`regen.horizon`) en is de volgende keer de standaard.
 
 ## Installeren op je telefoon
 
@@ -171,3 +171,14 @@ Eerste ronde verbeteringen na de audit van 1 november 2026.
 
 - **Temperatuur-tab:** ICON-D2 levert voor de laatste uren van zijn run geen gevoelstemperatuur. De tabel liep daarop vast (`fmtNum(null)`), waardoor de tabel ontbrak en er een fout in de console kwam. `fmtNum` toont een ontbrekende waarde nu als "–"; dat geldt voor alle tabellen en tooltips.
 - Zelftests: 63.
+
+## Versie 18: elke tab past op één iPhone-scherm
+
+- **Geen zoomknoppen meer:** de balk "Vooruit · 48 u · t/m za 17:00" met 12 u · 24 u · 48 u is weg; zoomen gaat met twee vingers op een grafiek. De kaarttitel ("Komende 24 uur") loopt mee tijdens het knijpen.
+- **Info-knop in de kop:** "Info en bronnen" stond onderaan elke tab en kostte de ruimte die een tab nodig had. Het is nu een i-icoontje rechts naast de plaatsnaam.
+- **Ruimte onder de inhoud** is precies de tabbalk plus 8 px, zodat een tab die past niet meer een stukje scrolt.
+- **Wind:** de legenda staat op één regel ("Wind", "Stoten", onzekerheid; de pijlen staan uitgelegd onder Info), de kop noemt geen graden meer (die staan in tabel en tooltip), de boom is 120 px en de grafiek 200 px.
+- **Temperatuur en Bewolking** gebruiken de vrijgekomen ruimte: grafiek 260 px.
+- **Tab wisselen begint bovenaan.** Het scherm scrolt soepel (`scroll-behavior: smooth`); bij een tabwissel begon die animatie naar boven, waarna het opnieuw opbouwen de halve scrollpositie terugzette. Nu springt het scherm direct naar boven.
+- Gemeten op 393 × 852 (iPhone 15/16) met de veilige marges van de iPhone nagebootst: Overzicht, Temperatuur, Wind en Bewolking passen zonder scrollen. Regen scrolt nog, zoals bedoeld.
+- Zelftests: 64.

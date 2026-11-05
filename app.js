@@ -1239,34 +1239,12 @@ function setHorizon(hours, persist = true) {
   state.horizon = hz;
   if (persist) { try { if (hz == null) localStorage.removeItem('regen.horizon'); else localStorage.setItem('regen.horizon', String(Math.round(hz))); } catch (e) {} }
   if (persist) { render(); return; }
-  // live (mid-gesture): redraw only the charts, keep the DOM the fingers are on
-  for (const host of document.querySelectorAll('.chart.zoomable')) if (host._redraw) host._redraw();
-  const cur = hz == null ? max : hz;
-  const end = new Date(state.forecast.startHour.getTime() + cur * HOUR);
-  const val = document.querySelector('.hz-val');
-  if (val) val.textContent = `${Math.round(cur)} u · t/m ${fmtDayTime(end)}`;
-}
-function horizonBar() {
-  const bar = h('div', 'horizon');
-  const max = maxHorizonHours();
-  const cur = state.horizon == null ? max : state.horizon;
-  const end = new Date(state.forecast.startHour.getTime() + cur * HOUR);
-  const lbl = h('div', 'hz-label');
-  lbl.appendChild(h('span', 'hz-title', 'Vooruit'));
-  lbl.appendChild(h('span', 'hz-val', `${Math.round(cur)} u · t/m ${fmtDayTime(end)}`));
-  bar.appendChild(lbl);
-  const seg = h('div', 'segmented compact');
-  const presets = [[12, '12 u'], [24, '24 u'], [48, '48 u']];
-  for (const [hrs, label] of presets) {
-    const btn = h('button', null, label); btn.type = 'button';
-    const active = Math.abs(cur - hrs) < 0.5;
-    btn.setAttribute('aria-pressed', String(active));
-    btn.disabled = hrs > max + 0.5;
-    btn.addEventListener('click', () => setHorizon(hrs >= max ? null : hrs));
-    seg.appendChild(btn);
+  // live (mid-gesture): redraw only the charts and their card titles, keep the DOM the fingers are on
+  for (const host of document.querySelectorAll('.chart.zoomable')) {
+    if (host._redraw) host._redraw();
+    const title = host.closest('.card') && host.closest('.card').querySelector('h2');
+    if (title) title.textContent = spanTitle();
   }
-  bar.appendChild(seg);
-  return bar;
 }
 function spanTitle() {
   const cur = state.horizon == null ? maxHorizonHours() : state.horizon;
@@ -1320,7 +1298,6 @@ function renderRain(c) {
   } else errorNote(k1.body, 'nowcast', 'Radar');
 
   // HARMONIE card
-  c.appendChild(horizonBar());
   const k2 = card('Komende dagen', []);
   c.appendChild(k2.el);
   if (!H || !H.applicable) { errorNote(k2.body, 'forecast', 'Modelverwachting'); if (!state.errors.forecast) k2.body.appendChild(h('p', 'empty', 'Geen verwachting voor deze locatie.')); return; }
@@ -1469,7 +1446,6 @@ function renderOverview(c) {
   heroIcon.appendChild(weatherIcon(0, 0, kind0, night0));
   heroEl.insertBefore(heroIcon, heroEl.firstChild);
 
-  c.appendChild(horizonBar());
   const k = card(spanTitle(), []);
   c.appendChild(k.el);
   const icons = hourIcons(H);
@@ -1687,7 +1663,7 @@ function renderInfo(c) {
   };
   sec('Wat je ziet', [
     'De app toont de verwachting voor de komende 48 uur voor de gekozen plaats. <b>Regen</b> begint met de radar voor de komende 2 uur (per 5 minuten) en daaronder de neerslag per uur met de kans op regen. <b>Overzicht</b> zet temperatuur en weerbeeld per uur naast elkaar. <b>Temperatuur</b>, <b>Wind</b> en <b>Bewolking</b> tonen elk hun eigen verloop.',
-    'Zoomen: knijp met twee vingers op een grafiek, of kies 12, 24 of 48 uur. De grafiek begint altijd bij nu; de keuze wordt onthouden. Sleep met één vinger over een grafiek om de waarden van dat moment te zien; de stippellijn volgt je vinger.',
+    'Zoomen: spreid twee vingers op een grafiek om in te zoomen, knijp ze samen om weer verder vooruit te kijken (tot 48 uur). De grafiek begint altijd bij nu; de titel van de kaart toont hoeveel uur je ziet en de keuze wordt onthouden. Sleep met één vinger over een grafiek om de waarden van dat moment te zien; de stippellijn volgt je vinger.',
     'De achtergrond van elke grafiek volgt de zon: warm bij daglicht, grijzer naarmate er meer bewolking is, donker in de nacht, met schemer ertussen. De zonnetjes boven de grafiek staan op zonsopkomst en -ondergang en tonen het weerbeeld van dat moment.',
     'Het <b>weerbeeld</b> (zonnig, half bewolkt, bewolkt) komt overdag uit hoeveel zon het KNMI-model in dat uur laat binnenkomen, vergeleken met een heldere hemel. Zo telt een uur met volop zon en een enkel wolkje als zonnig. Bij lage zon en \'s nachts beslist de bewolking.',
   ]);
@@ -1704,7 +1680,7 @@ function renderInfo(c) {
   ]);
   sec('Hoe je de grafieken leest', [
     'Een <b>neerslagstaaf</b> is de som over dat uur; de radarstaven zijn de intensiteit op dat moment, in millimeter per uur. De uren die de radar dekt (ongeveer de eerste twee) komen ook in de uurgrafiek uit de radar, zodat beide grafieken hetzelfde zeggen; voor die uren staat er geen kans. Van het lopende uur telt alleen wat nog komt. Lichte regen is 0,1 tot 1 mm per uur, matige regen 1 tot 4, zware regen meer dan 4.',
-    '<b>Windpijlen</b> wijzen waarheen de wind waait; in de tekst staat waar de wind vandaan komt, zoals gebruikelijk. Beaufort volgt uit de uursnelheid volgens de KNMI-tabel; de boom laat zien wat die kracht met een boom doet.',
+    '<b>Windpijlen</b> (elke 3 uur) wijzen waarheen de wind waait; in de tekst staat waar de wind vandaan komt, zoals gebruikelijk. Beaufort volgt uit de uursnelheid volgens de KNMI-tabel; de boom laat zien wat die kracht met een boom doet.',
     '<b>Bewolking</b> is het deel van de hemel dat bedekt is. De lijn wordt donkerder grijs naarmate er meer bewolking is. Het model geeft per uur een momentopname van één vakje van 2 km, die bij losse wolken tussen 0 en 100% springt; de app middelt daarom elk uur met het uur ervoor en erna.',
   ]);
   sec('Beaufort volgens KNMI', [
@@ -1733,11 +1709,10 @@ function renderTemp(c) {
     heroBlock(c, tempIcon, `Nu · ${fmtTime(nowRow.t)} · verwacht`, `${fmtNum(nowRow.temperature_2m, 0)}°`, `voelt als ${fmtNum(nowRow.apparent_temperature, 0)}° · vandaag ${fmtNum(mn, 0)}° tot ${fmtNum(mx, 0)}°`);
   }
 
-  c.appendChild(horizonBar());
   const k1 = card(spanTitle(), []);
   c.appendChild(k1.el);
   drawChart(k1.body, { sky: skyOf(),
-    ...spanFor([H]), unit: '°C', unitTip: '°C', ticks: 'days', now: new Date(), yOpts: { minSpan: 6, targetTicks: 4 },
+    ...spanFor([H]), unit: '°C', unitTip: '°C', ticks: 'days', height: 260, now: new Date(), yOpts: { minSpan: 6, targetTicks: 4 },
     series: [
       ...(withBand ? ensBand('temperature_2m') : []),
       { kind: 'line', name: 'Temperatuur', color: 'var(--s1)', points: instantPts(T, 'temperature_2m'), area: true, smooth: 'soft' },
@@ -1758,17 +1733,16 @@ function renderWind(c) {
   const windIcon = '<svg class="ico-big" viewBox="0 0 24 24"><path d="M3 8h11a2.5 2.5 0 1 0-2.5-2.5M3 12h15a2.5 2.5 0 1 1-2.5 2.5M3 16h8a2 2 0 1 1-2 2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
   if (o && o.wind != null) {
     heroBlock(c, windIcon, `Gemeten ${fmtTime(o.time)} · ${o.station} (${fmtNum(o.dist, 0)} km)`, `${fmtNum(o.wind, 0)} km/u`,
-      `${beaufort(o.wind)} Bft${o.dir != null ? ` uit ${compass(o.dir)} (${fmtDeg(o.dir)})` : ''}${o.gust != null ? ` · stoten ${fmtNum(o.gust, 0)} km/u` : ''} · verwacht nu ${fmtNum(r0.wind_speed_10m, 0)} km/u`);
+      `${beaufort(o.wind)} Bft${o.dir != null ? ` uit ${compass(o.dir)}` : ''}${o.gust != null ? ` · stoten ${fmtNum(o.gust, 0)}` : ''} · verwacht ${fmtNum(r0.wind_speed_10m, 0)} km/u`);
   } else {
-    heroBlock(c, windIcon, `Nu · ${fmtTime(r0.t)} · verwacht`, `${fmtNum(r0.wind_speed_10m, 0)} km/u`, `${beaufort(r0.wind_speed_10m)} Bft uit ${compass(r0.wind_direction_10m)} (${fmtDeg(r0.wind_direction_10m)}) · stoten ${fmtNum(r0.wind_gusts_10m, 0)} km/u`);
+    heroBlock(c, windIcon, `Nu · ${fmtTime(r0.t)} · verwacht`, `${fmtNum(r0.wind_speed_10m, 0)} km/u`, `${beaufort(r0.wind_speed_10m)} Bft uit ${compass(r0.wind_direction_10m)} · stoten ${fmtNum(r0.wind_gusts_10m, 0)} km/u`);
   }
 
-  c.appendChild(horizonBar());
   const k1 = card(spanTitle(), []);
   c.appendChild(k1.el);
   const arrows = H.instant.filter(p => p.t.getHours() % 3 === 0 && p.wind_direction_10m != null).map(p => ({ t: p.t, deg: p.wind_direction_10m }));
   drawChart(k1.body, { sky: skyOf(),
-    ...spanFor([H]), unit: 'km/u', unitTip: 'km/u', ticks: 'days', now: new Date(), yOpts: { zero: true, minSpan: 20, headroom: 1.1 },
+    ...spanFor([H]), unit: 'km/u', unitTip: 'km/u', ticks: 'days', height: 200, now: new Date(), yOpts: { zero: true, minSpan: 20, headroom: 1.1 },
     series: [
       ...ensBand('wind_speed_10m'),
       { kind: 'line', name: 'Wind', color: 'var(--s1)', points: instantPts(H, 'wind_speed_10m'), area: true, smooth: 'soft' },
@@ -1786,7 +1760,8 @@ function renderWind(c) {
   const treeNow = () => (o && o.wind != null ? setTree(tree, o.wind, o.dir, `Nu, gemeten ${fmtTime(o.time)}`, rainNow) : setTree(tree, r0.wind_speed_10m, r0.wind_direction_10m, `Nu, verwacht`, rainNow));
   treeNow();
   k1.body.after(tree);
-  legend(k1.el, [{ name: 'Windsnelheid', color: 'var(--s1)' }, { name: 'Windstoten', color: 'var(--s1)', dashed: true }, ...ensLegend(), { name: 'Pijl: richting waarheen de wind waait, elke 3 u', color: 'var(--label-3)' }]);
+  // short names keep the legend on one line; the arrows are explained under Info
+  legend(k1.el, [{ name: 'Wind', color: 'var(--s1)' }, { name: 'Stoten', color: 'var(--s1)', dashed: true }, ...ensLegend()]);
   k1.tableHost.appendChild(dataTable(H.instant, [{ label: 'Uur', get: p => fmtDayTime(p.t) }, { label: 'km/u', num: true, get: p => fmtNum(p.wind_speed_10m, 0) }, { label: 'Stoten', num: true, get: p => fmtNum(p.wind_gusts_10m, 0) }, { label: 'Uit', get: p => `${compass(p.wind_direction_10m)} ${fmtDeg(p.wind_direction_10m)}` }]));
 }
 
@@ -1797,12 +1772,11 @@ function renderCloud(c) {
   heroBlock(c, '<svg class="ico-big" viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 10h.5a4 4 0 0 1 0 8H7z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
     `Nu · ${fmtTime(r0.t)}`, cloudWord(r0.cloud_cover), `${r0.cloud_cover}% bedekt · laag ${r0.cloud_cover_low}% · midden ${r0.cloud_cover_mid}% · hoog ${r0.cloud_cover_high}%`);
 
-  c.appendChild(horizonBar());
   const k1 = card(spanTitle(), []);
   c.appendChild(k1.el);
   const pct = { min: 0, max: 100, step: 25 };
   drawChart(k1.body, { sky: skyOf(),
-    ...spanFor([H]), unit: '%', unitTip: '%', ticks: 'days', now: new Date(), yFixed: pct,
+    ...spanFor([H]), unit: '%', unitTip: '%', ticks: 'days', height: 260, now: new Date(), yFixed: pct,
     series: [
       ...ensBand('cloud_cover', 'var(--cloud-hi)'),
       { kind: 'line', name: 'Totaal', color: 'var(--cloud-hi)', colorAt: cloudGrey, points: instantPts(H, 'cloud_cover'), area: true, areaOpacity: 0.18 },
@@ -1820,13 +1794,15 @@ function renderCloud(c) {
 /* ======================================================================
    5. UI wiring: tabs, sheet, search, geolocation
    ====================================================================== */
-$('infoBtn').addEventListener('click', () => { state.tab = 'info'; $('screen').scrollTo({ top: 0, behavior: 'auto' }); render(); });
+// jump, not glide: .screen scrolls smoothly, and render() would put a half-finished scroll back
+const toTop = () => { const s = $('screen'); s.style.scrollBehavior = 'auto'; s.scrollTop = 0; s.style.scrollBehavior = ''; };
+$('infoBtn').addEventListener('click', () => { state.tab = 'info'; toTop(); render(); });
 for (const btn of document.querySelectorAll('.tab')) {
   btn.addEventListener('click', () => {
     if (state.tab === btn.dataset.tab) { $('screen').scrollTo({ top: 0 }); return; }
     state.tab = btn.dataset.tab;
     try { localStorage.setItem('regen.tab', state.tab); } catch (e) {}
-    $('screen').scrollTo({ top: 0, behavior: 'auto' });
+    toTop();
     render();
   });
 }
@@ -2430,6 +2406,14 @@ function runTests() {
       eq(tempModel().key, 'harmonie');
       const { mn, mx } = todayRange(state.forecast.models.harmonie); eq(mn, 10); eq(mx, 10);
     } finally { state.forecast = saved; }
+  });
+  test('tabwissel: de nieuwe tab begint meteen bovenaan, ook al scrolt het scherm soepel', () => {
+    const s = $('screen'), spacer = h('div'); spacer.style.height = '3000px'; s.appendChild(spacer);
+    try {
+      s.style.scrollBehavior = 'auto'; s.scrollTop = 800; s.style.scrollBehavior = '';
+      ok(s.scrollTop > 0, 'uitgangspunt: naar beneden gescrold');
+      toTop(); eq(s.scrollTop, 0, 'direct 0, niet halverwege een animatie');
+    } finally { spacer.remove(); }
   });
 
   const panel = h('div', 'tests');
