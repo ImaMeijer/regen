@@ -173,11 +173,33 @@ function clearSky(t0, t1, lat, lon) {
    An hourly mean does not flip with one passing cloud. Satellite checks put a clear sky at ≈ 0,9 of
    Haurwitz, so 0,9 → 0 % and 0,3 → 100 %. Below ~6° sun the ratio gets noisy: null, use cloud cover. */
 const SKY_MIN_SIN = 0.1;
-function skyFromSun(sw, t0, t1, lat, lon, c = lat == null || lon == null ? null : clearSky(t0, t1, lat, lon)) {
-  if (sw == null || !c) return null; // c: the hour's clear sky, passed in when many members share the hour
-  if (c.sin < SKY_MIN_SIN) return null;
-  return Math.round(clamp((0.9 - sw / c.ghi) / 0.6, 0, 1) * 100);
+/* The sunshine of an hour as a share of a clear sky (Haurwitz; a really clear sky reaches ≈ 0,9 of it); null at low
+   sun. c: the hour's clear sky, passed in when many members share the hour. */
+function sunRatio(sw, t0, t1, lat, lon, c = lat == null || lon == null ? null : clearSky(t0, t1, lat, lon)) {
+  if (sw == null || !c || c.sin < SKY_MIN_SIN) return null;
+  return sw / c.ghi;
 }
+function skyFromSun(sw, t0, t1, lat, lon, c) {
+  const k = sunRatio(sw, t0, t1, lat, lon, c);
+  return k == null ? null : Math.round(clamp((0.9 - k) / 0.6, 0, 1) * 100);
+}
+/* Icon of a forecast hour (everything except the measured weather of now): the model's cloud cover decides; when
+   the sky is (nearly) closed the sunshine getting through tells thin from thick. Lots of sun under a closed sky is
+   broken cloud (HARMONIE's 2 km cells flip to 100 % under a passing cumulus). Without sunshine (low sun, night) the
+   layers decide: high cloud alone is a veil. THIN_SUN is a first guess from the week of 2 nov 2026; it is being
+   checked daily against satellite and KNMI observations. */
+const THIN_SUN = [0.60, 0.85]; // share of a clear sky: below = bewolkt, between = dunne bewolking, above = half bewolkt
+function forecastKind({ cloud, low, mid, high, sun, rain }) {
+  if (rain != null && rain >= 0.1) return 'rain';
+  if (cloud == null) return sun == null ? 'clear' : sunWeatherKind({ cloud: Math.round(clamp((0.9 - sun) / 0.6, 0, 1) * 100) });
+  if (cloud < 30) return 'clear';
+  if (cloud < 70) return 'partly';
+  if (sun != null) return sun >= THIN_SUN[1] ? 'partly' : sun >= THIN_SUN[0] ? 'thin' : 'cloud';
+  if (low != null && mid != null && high != null && low < 30 && mid < 30 && high >= 70) return 'thin';
+  return 'cloud';
+}
+/* How grey the sky of a chart is: the model's cloud cover, a thin veil counting for half. */
+const tintCover = (kind, cloud) => (cloud == null ? null : kind === 'thin' ? cloud / 2 : cloud);
 /* Sky tint as a function of sun altitude: day above +8°, golden around the horizon, darkening through civil
    and nautical twilight, full night below −18°. Returns [r,g,b] mixed from the theme's sky tokens. */
 function hexToRgb(hx) { const s = hx.trim().replace('#', ''); const n = parseInt(s.length === 3 ? s.split('').map(c => c + c).join('') : s, 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
@@ -289,7 +311,7 @@ function parseForecast(json, now = new Date()) {
       const row = { t: times[i - 1], tEnd: times[i] };
       for (const v of INTERVAL_VARS) { const a = get(v); row[v] = a ? a[i] : null; }
       if (row.precipitation == null) continue;
-      row.sky = skyFromSun(row.shortwave_radiation, row.t, row.tEnd, json.latitude, json.longitude);
+      row.sun = sunRatio(row.shortwave_radiation, row.t, row.tEnd, json.latitude, json.longitude);
       interval.push(row);
     }
     models[m.key] = { ...m, applicable, hours, instant, interval,
@@ -322,7 +344,7 @@ function compareRain(primary, other, hours = COMPARE_HOURS) {
    2. Chart engine (SVG)
    ====================================================================== */
 /* ---- sun glyphs: the weather of the hour decides the picture ---- */
-const SUN_WORDS = { clear: 'helder', partly: 'half bewolkt', cloud: 'bewolkt', rain: 'regen' };
+const SUN_WORDS = { clear: 'helder', partly: 'half bewolkt', thin: 'dunne bewolking', cloud: 'bewolkt', rain: 'regen' };
 function sunWeatherKind(w) {
   if (!w) return 'clear';
   if (w.rain != null && w.rain >= 0.1) return 'rain';
@@ -348,7 +370,12 @@ function sunGlyph(px, py, event, kind, title) {
   sun.appendChild(rays);
   clipped.appendChild(sun);
   g.appendChild(clipped);
-  if (kind !== 'clear') {
+  if (kind === 'thin') {
+    // a veil of thin streaks across the lower half of the sun
+    const veil = svgEl('g', { class: 'veil' });
+    for (const [x1, x2, y] of [[-7.5, 3, 1.4], [-4, 7.5, 3.8]]) veil.appendChild(svgEl('line', { x1, x2, y1: y, y2: y }));
+    g.appendChild(veil);
+  } else if (kind !== 'clear') {
     // cloud sits in front of the sun, lower right; bigger when overcast or raining
     const s = kind === 'partly' ? 0.8 : 1;
     const cloud = svgEl('g', { class: 'cloud', transform: `translate(${kind === 'partly' ? 3.5 : 3.2},${kind === 'partly' ? 3 : 3}) scale(${s})` });
@@ -381,7 +408,19 @@ function weatherIcon(px, py, kind, night) {
       g.appendChild(sun);
     }
   }
-  if (kind !== 'clear') {
+  if (kind === 'thin') {
+    // dunne bewolking: the sun (or moon) shows above a veil of three thin streaks
+    if (night) g.appendChild(svgEl('path', { class: 'moon', d: 'M1.2 -4.2a4.2 4.2 0 1 0 3.3 6.6a3.4 3.4 0 0 1-3.3-6.6z', transform: 'translate(0,-1.2)' }));
+    else {
+      const sun = svgEl('g', { class: 'sun-core', transform: 'translate(0,-0.6)' });
+      sun.appendChild(svgEl('circle', { class: 'disc', r: 3.4 }));
+      for (const a of [-90, -135, -45, 180, 0]) { const r = rad(a); sun.appendChild(svgEl('line', { x1: Math.cos(r) * 4.6, y1: Math.sin(r) * 4.6, x2: Math.cos(r) * 6, y2: Math.sin(r) * 6 })); }
+      g.appendChild(sun);
+    }
+    const veil = svgEl('g', { class: 'veil' });
+    for (const [x1, x2, y] of [[-7, 2.5, 1.2], [-4.5, 6.5, 3.6], [-6.5, 1.5, 6]]) veil.appendChild(svgEl('line', { x1, x2, y1: y, y2: y }));
+    g.appendChild(veil);
+  } else if (kind !== 'clear') {
     const s = kind === 'partly' ? 0.85 : 1.05;
     const cloud = svgEl('g', { class: 'cloud', transform: `translate(${kind === 'partly' ? 2.5 : 1},${kind === 'partly' ? 2.5 : 0.5}) scale(${s})` });
     cloud.appendChild(svgEl('path', { d: CLOUD_PATH }));
@@ -392,11 +431,11 @@ function weatherIcon(px, py, kind, night) {
       g.appendChild(drops);
     }
   }
-  const words = { clear: night ? 'helder' : 'zonnig', partly: 'half bewolkt', cloud: 'bewolkt', rain: 'regen' };
+  const words = { clear: night ? 'helder' : 'zonnig', partly: 'half bewolkt', thin: 'dunne bewolking', cloud: 'bewolkt', rain: 'regen' };
   g.appendChild(svgEl('title', {}, words[kind]));
   return g;
 }
-const ICON_WORDS = { clear: 'zonnig', partly: 'half bewolkt', cloud: 'bewolkt', rain: 'regen' };
+const ICON_WORDS = { clear: 'zonnig', partly: 'half bewolkt', thin: 'dunne bewolking', cloud: 'bewolkt', rain: 'regen' };
 /* temperature → colour, cold blue through amber to warm red; interpolated between fixed stops */
 const TEMP_STOPS = [[-10, [79, 127, 216]], [5, [42, 120, 214]], [12, [58, 160, 168]], [18, [237, 161, 0]], [26, [235, 104, 52]], [34, [227, 73, 72]]];
 function tempColor(v) {
@@ -553,7 +592,7 @@ function drawChart(host, spec) {
     const px = x(ev.t.getTime());
     if (px < m.left || px > W - m.right) continue;
     const wx = spec.sky.weatherAt ? spec.sky.weatherAt(ev.t) : null;
-    const kind = sunWeatherKind(wx);
+    const kind = wx && wx.kind ? wx.kind : sunWeatherKind(wx);
     svg.appendChild(sunGlyph(px, glyphY, ev.kind, kind, `${ev.kind === 'sunrise' ? 'Zon op' : 'Zon onder'} ${fmtTime(ev.t)} · ${SUN_WORDS[kind]}`));
   }
 
@@ -878,7 +917,7 @@ const ensembleUrl = (lat, lon) => `https://ensemble-api.open-meteo.com/v1/ensemb
 /* ECMWF-ensemble (IFS ENS, 51 leden, 0,25°), hetzelfde ensemble als de KNMI-pluim. Alleen voor de dagen in Week
    voorbij wat HARMONIE en ICON-D2 dekken. */
 const ECMWF = { id: 'ecmwf_ifs025', long: 'ECMWF-ensemble', members: 51, res: '25 km' };
-const ECMWF_VARS = ['temperature_2m', 'precipitation', 'cloud_cover', 'shortwave_radiation', 'wind_speed_10m', 'wind_direction_10m'];
+const ECMWF_VARS = ['temperature_2m', 'precipitation', 'cloud_cover', 'cloud_cover_low', 'cloud_cover_mid', 'cloud_cover_high', 'shortwave_radiation', 'wind_speed_10m', 'wind_direction_10m'];
 const ecmwfUrl = (lat, lon) => `https://ensemble-api.open-meteo.com/v1/ensemble?latitude=${lat.toFixed(4)}&longitude=${lon.toFixed(4)}` +
   `&hourly=${ECMWF_VARS.join(',')}&models=${ECMWF.id}&forecast_days=8&timezone=Europe%2FAmsterdam`;
 
@@ -954,8 +993,10 @@ function ensDayChance(json, now, lat, lon) {
   }
   return out;
 }
-/* One member's day by the same rules as HARMONIE's days: per light hour an icon from sun % (else the smoothed
-   cloud cover) and rain, the day the median; min/max over the day; rain over the light hours. null when incomplete. */
+/* Icon of hour i of an ECMWF member by the forecast rule: its smoothed cloud cover and layers, sunshine and rain. */
+const memberKind = (m, i, rain, sun) => forecastKind({ cloud: smoothAt(m.C, i), low: smoothAt(m.L, i), mid: smoothAt(m.M, i), high: smoothAt(m.Hc, i), sun, rain });
+/* One member's day by the same rules as HARMONIE's days: per light hour an icon by the forecast rule, the day the
+   median; min/max over the day; rain over the light hours. null when incomplete. */
 function memberDay(m, ia, n, times, lat, lon) {
   const temps = [], ranks = [];
   let rain = 0;
@@ -966,8 +1007,7 @@ function memberDay(m, ia, n, times, lat, lon) {
     const t0 = times[i], t1 = times[i + 1];
     if (!isLightHour(t0, lat, lon)) continue;
     rain += pr;
-    const sky = skyFromSun(m.S[i + 1], t0, t1, lat, lon);
-    ranks.push(KIND_RANK.indexOf(sunWeatherKind({ cloud: sky != null ? sky : smoothAt(m.C, i), rain: pr })));
+    ranks.push(KIND_RANK.indexOf(memberKind(m, i, pr, sunRatio(m.S[i + 1], t0, t1, lat, lon))));
   }
   return { kind: medianKind(ranks), mn: Math.min(...temps), mx: Math.max(...temps), rain };
 }
@@ -980,7 +1020,8 @@ function parseEcmwf(json, lat, lon, now = new Date()) {
   const times = hh.time.map(s => new Date(s));
   const members = memberSuffixes(hh, 'temperature_2m').map(s => ({
     T: hh['temperature_2m' + s], P: hh['precipitation' + s] || [], C: hh['cloud_cover' + s] || [], S: hh['shortwave_radiation' + s] || [],
-    W: hh['wind_speed_10m' + s] || [], D: hh['wind_direction_10m' + s] || [] }));
+    W: hh['wind_speed_10m' + s] || [], D: hh['wind_direction_10m' + s] || [],
+    L: hh['cloud_cover_low' + s] || [], M: hh['cloud_cover_mid' + s] || [], Hc: hh['cloud_cover_high' + s] || [] }));
   return { days: ecmwfDays(members, times, lat, lon, now), hours: ecmwfHours(members, times, lat, lon), members: members.length };
 }
 /* Per hour over the members, for the day pages of the ECMWF days (as the KNMI plume): temperature as median
@@ -996,10 +1037,9 @@ function ecmwfHours(members, times, lat, lon) {
     for (const m of members) {
       const pr = m.P[i + 1];
       if (m.T[i] == null || pr == null) continue;
-      const sky = skyFromSun(m.S[i + 1], t0, t1, lat, lon, cs);
-      const cover = sky != null ? sky : smoothAt(m.C, i);
+      const kind = memberKind(m, i, pr, sunRatio(m.S[i + 1], t0, t1, lat, lon, cs)), cover = tintCover(kind, smoothAt(m.C, i));
       T.push(m.T[i]); P.push(pr); C.push(cover == null ? 0 : cover);
-      K.push(KIND_RANK.indexOf(sunWeatherKind({ cloud: cover, rain: pr })));
+      K.push(KIND_RANK.indexOf(kind));
       if (m.W[i] != null) W.push({ kmh: m.W[i], dir: m.D[i] });
     }
     if (T.length < need) break;
@@ -1250,10 +1290,12 @@ function staleNote(stale) {
   return n;
 }
 
-/* Sky cover for an hour: by day from the sunshine in that hour, otherwise the (smoothed) cloud cover. */
-const coverOf = (iv, row) => (iv && iv.sky != null ? iv.sky : row.cloud_cover);
-/* Weather at an instant, from HARMONIE: sky cover and precipitation of the hour containing t; at night or
-   low sun the cloud cover of the nearest hour. */
+/* Icon of the HARMONIE hour [r.t, r.t + 1 h): the (smoothed) cloud cover and layers at its start, the sunshine
+   and rain over the hour. */
+const hourKind = (iv, r) => forecastKind({ cloud: r.cloud_cover, low: r.cloud_cover_low, mid: r.cloud_cover_mid, high: r.cloud_cover_high,
+  sun: iv ? iv.sun : null, rain: iv ? iv.precipitation : null });
+/* Weather at an instant, from HARMONIE, for the sky tint and the sunrise/sunset glyphs: the icon and rain of
+   the hour containing t (its cloud cover at the start of that hour, else of the nearest hour). */
 function weatherAt(t) {
   const H = state.forecast && state.forecast.models.harmonie;
   if (!H || !H.applicable) return null;
@@ -1262,7 +1304,9 @@ function weatherAt(t) {
   for (const r of H.instant) if (!best || Math.abs(r.t.getTime() - ms) < Math.abs(best.t.getTime() - ms)) best = r;
   if (!best || Math.abs(best.t.getTime() - ms) > HOUR) return null;
   const iv = H.interval.find(p => ms >= p.t.getTime() && ms < p.tEnd.getTime());
-  return { cloud: coverOf(iv, best), rain: iv ? iv.precipitation : null };
+  const r = (iv && H.instant.find(p => p.t.getTime() === iv.t.getTime())) || best;
+  const kind = hourKind(iv, r);
+  return { cloud: tintCover(kind, r.cloud_cover), rain: iv ? iv.precipitation : null, kind };
 }
 const cloudAt = t => { const w = weatherAt(t); return w && w.cloud != null ? w.cloud / 100 : null; };
 const skyOf = () => ({ lat: state.loc.lat, lon: state.loc.lon, weatherAt, cloudAt });
@@ -1760,7 +1804,7 @@ function todayRange(m) {
 }
 
 /* ---------------- Week: per dag het weerbeeld bij daglicht en min/max ---------------- */
-const KIND_RANK = ['clear', 'partly', 'cloud', 'rain'];
+const KIND_RANK = ['clear', 'partly', 'thin', 'cloud', 'rain'];
 /* Day icon: the median of the hourly icons (same rules as the hourly row) over the hours of daylight, an
    hour counting when its midpoint has the sun above the horizon. A clear day that clouds over in its last
    two light hours stays sunny. With an even count the two middle ranks are averaged, halves rounded up.
@@ -1771,7 +1815,7 @@ function dayKind(H, a, b, lat, lon) {
     if (!isLightHour(new Date(t), lat, lon)) continue;
     const r = H.instant.find(p => p.t.getTime() === t), iv = H.interval.find(p => p.t.getTime() === t);
     if (!r || !iv) return null;
-    ranks.push(KIND_RANK.indexOf(sunWeatherKind({ cloud: coverOf(iv, r), rain: iv.precipitation })));
+    ranks.push(KIND_RANK.indexOf(hourKind(iv, r)));
   }
   return medianKind(ranks);
 }
@@ -1812,7 +1856,7 @@ function withDays(json, now, lat, lon) {
 function hourIcons(H) {
   return H.instant.map(r => {
     const iv = H.interval.find(p => p.t.getTime() === r.t.getTime());
-    const kind = sunWeatherKind({ cloud: coverOf(iv, r), rain: iv ? iv.precipitation : null });
+    const kind = hourKind(iv, r);
     const mid = new Date(r.t.getTime() + HOUR / 2);
     return { t: mid, kind, night: sunAltitude(mid, state.loc.lat, state.loc.lon) < SUN_RISESET, hour: r.t };
   });
@@ -1821,11 +1865,11 @@ function hourIcons(H) {
    Rain comes from the station's wording or the current hour, which already holds the radar. */
 function nowKind(now) {
   const w = weatherAt(now), o = state.obs;
-  if (!o) return sunWeatherKind(w);
+  if (!o) return w ? w.kind : 'clear';
   const dk = descKind(o.desc);
   if (dk === 'rain' || (w && w.rain != null && w.rain >= 0.1)) return 'rain';
   if (o.sky != null) return sunWeatherKind({ cloud: o.sky, rain: null });
-  return dk || sunWeatherKind(w);
+  return dk || (w ? w.kind : 'clear');
 }
 /* Tile of a day page for a day other than today: the day's icon, min to max and the chance of rain. */
 function dayHero(c, d) {
@@ -2087,7 +2131,7 @@ function renderInfo(c) {
     'De app toont de verwachting voor de gekozen plaats. <b>Overzicht</b> begint met een regenbalk: of en wanneer het de komende twee uur regent, met een mini-radar per 5 minuten. Daaronder het weer per uur en de komende zeven dagen, met per dag het weerbeeld, de laagste en hoogste temperatuur en de kans op regen. Tik op de regenbalk voor <b>Regen</b> (de radar voor de komende 2 uur en de neerslag per uur met de kans op regen) en op de uurstrook voor <b>Per uur</b>, dat temperatuur en weerbeeld per uur naast elkaar zet. Tik op een dag in de lijst voor dezelfde pagina voor alleen die dag; voor de dagen na morgen komt die uit het ECMWF-ensemble: de lijn is de middelste van de 51 berekeningen en de band laat zien waar 90% van de berekeningen zit (de 5% hoogste en de 5% laagste vallen erbuiten, zoals de lichte band van de KNMI-pluim), voor temperatuur én regen; bij regen noemt de tooltip die band gewoon als "0,0 tot 0,4 mm", omdat de middelste waarde bij buien bijna altijd 0 is, en de boompjes tonen de wind van de middelste berekening; "‹ Overzicht" brengt je terug. <b>Temperatuur</b>, <b>Wind</b> en <b>Bewolking</b> tonen elk hun eigen verloop.',
     'Zoomen: spreid twee vingers op een grafiek om in te zoomen, knijp ze samen om weer verder vooruit te kijken (tot 48 uur). De grafiek begint altijd bij nu; de titel van de kaart toont hoeveel uur je ziet en de keuze wordt onthouden. Sleep met één vinger over een grafiek om de waarden van dat moment te zien; de stippellijn volgt je vinger.',
     'De achtergrond van elke grafiek volgt de zon: warm bij daglicht, grijzer naarmate er meer bewolking is, donker in de nacht, met schemer ertussen. De zonnetjes boven de grafiek staan op zonsopkomst en -ondergang en tonen het weerbeeld van dat moment.',
-    'Het <b>weerbeeld</b> (zonnig, half bewolkt, bewolkt) komt overdag uit hoeveel zon het KNMI-model in dat uur laat binnenkomen, vergeleken met een heldere hemel. Zo telt een uur met volop zon en een enkel wolkje als zonnig. Bij lage zon en \'s nachts beslist de bewolking.',
+    'Het <b>weerbeeld</b> van een verwacht uur (zonnig, half bewolkt, dunne bewolking, bewolkt, regen) komt uit de bewolking van het model: minder dan 30% is zonnig, 30 tot 70% half bewolkt. Is de lucht (bijna) dicht, dan kijkt de app hoeveel zon er nog doorkomt, vergeleken met een heldere hemel: veel zon betekent losse wolken (half bewolkt), een flink deel betekent een sluier van dunne, hoge wolken (dunne bewolking: zon boven drie strepen) en weinig zon een dik wolkendek (bewolkt). Bij lage zon en \'s nachts beslissen de lagen: alleen hoge wolken is dunne bewolking. Vanaf 0,1 mm in het uur is het regen. Het weerbeeld van nu in de tegel komt uit de metingen.',
     'Bovenaan <b>Overzicht</b> staat het weer per uur, zo ver als ICON-D2 vooruit rekent (tot 48 uur): het icoontje met dezelfde regels als de uurrij op Per uur en de temperatuur van ICON-D2. Nu komt, net als in de tegel van Per uur, uit de metingen; om middernacht staat de naam van de nieuwe dag. Veeg opzij voor de volgende uren; tik erop voor Per uur.',
     'Het <b>weerbeeld van een dag</b> in Overzicht kijkt alleen naar de uren dat het licht is. Elk licht uur krijgt zijn eigen icoontje, met dezelfde regels als de uurrij op Per uur, en de dag krijgt het middelste daarvan (de mediaan). Een strak blauwe dag die in de laatste twee lichte uren dichttrekt, blijft zo een zonnige dag. Laagste en hoogste temperatuur gaan over de hele dag. Het getal met de druppel onder het icoontje is de kans op een natte dag: het deel van de ensembleberekeningen met minstens 0,5 mm in de lichte uren van die dag, getoond vanaf 10%; regen in de nacht telt niet mee, net als bij het icoontje. De balk loopt van laagste naar hoogste temperatuur op de schaal van alle dagen samen; de stip is de temperatuur van nu.',
     'De dagen in Overzicht gebruiken zolang het kan dezelfde modellen als de rest van de app: HARMONIE voor het weerbeeld, ICON-D2 voor de temperatuur en het ICON-D2-ensemble voor de kans, meestal vandaag en morgen. Voor de dagen daarna komt alles uit het <b>ECMWF-ensemble</b>, dat ook achter de pluim van het KNMI zit: 51 berekeningen op een raster van 25 km. Elke berekening krijgt zijn eigen dag met dezelfde regels; de dag krijgt het middelste icoontje van de 51 en de middelste laagste en hoogste temperatuur, zoals de pluim. Het vage deel van de balk is waar de middelste helft van de berekeningen zit; hoe breder, hoe onzekerder.',
@@ -2521,22 +2565,37 @@ function runTests() {
     eq(skyFromSun(5, new Date(2026, 10, 2, 7, 30), new Date(2026, 10, 2, 8, 30), 52.37, 4.9), null, 'zon net op');
     eq(skyFromSun(null, t0, t1, 52.37, 4.9), null); eq(skyFromSun(100, t0, t1, null, null), null);
   });
-  test('overzicht: overdag beslist de zon, niet een losse 100 % bewolking op het hele uur', () => {
+  test('icoon verwachting: bewolking beslist, bij een dichte lucht de zon die doorkomt; zonder zon de lagen', () => {
+    eq(forecastKind({ cloud: 20, sun: 0.3 }), 'clear', 'weinig bewolking: zonnig, ook bij weinig zon');
+    eq(forecastKind({ cloud: 50, sun: 0.3 }), 'partly');
+    eq(forecastKind({ cloud: 95, sun: 0.9 }), 'partly', 'dicht maar volop zon: losse wolken');
+    eq(forecastKind({ cloud: 95, sun: 0.77 }), 'thin', 'di 10 nov 13 u'); eq(forecastKind({ cloud: 95, sun: 0.6 }), 'thin');
+    eq(forecastKind({ cloud: 100, sun: 0.48 }), 'cloud', 'za 7 nov 15 u');
+    eq(forecastKind({ cloud: 90, low: 5, mid: 10, high: 90, sun: null }), 'thin', 'lage zon: alleen hoge wolken');
+    eq(forecastKind({ cloud: 90, low: 80, mid: 10, high: 90, sun: null }), 'cloud');
+    eq(forecastKind({ cloud: 90, sun: null }), 'cloud', 'zonder lagen: bewolkt');
+    eq(forecastKind({ cloud: 95, sun: 0.7, rain: 0.2 }), 'rain'); eq(forecastKind({ cloud: null, sun: 0.95 }), 'clear', 'zonder bewolking: de zon');
+    eq(tintCover('thin', 90), 45, 'een sluier telt voor de helft in de grijstint'); eq(tintCover('cloud', 90), 90);
+    const ic = weatherIcon(0, 0, 'thin', false); ok(ic.querySelector('.disc') && ic.querySelectorAll('.veil line').length === 3, 'zon boven drie sluierstrepen');
+    ok(weatherIcon(0, 0, 'thin', true).querySelector('.moon'), 'nacht: maan achter de sluier'); ok(sunGlyph(0, 0, 'sunset', 'thin', 't').querySelector('.veil'), 'ook bij zonsondergang');
+  });
+  test('overzicht: HARMONIE-uur met dichte lucht: veel zon = half bewolkt, sluier = dun, weinig zon = bewolkt', () => {
     const saved = state.forecast, savedLoc = state.loc;
     try {
-      // 2 nov: om 13:00 springt HARMONIE naar 100 %, maar het uur 13–14 is volop zon
+      // 2 nov: 12–15 u 100 % bewolking (gladgemaakt 75/100/75), met per uur steeds minder zon
       const time = [], base = new Date(2026, 10, 2, 0);
       for (let i = 0; i < 48; i++) { const d = new Date(base.getTime() + i * HOUR); time.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}T${String(d.getHours()).padStart(2, '0')}:00`); }
       const hourly = { time }, id = PRIMARY.id;
       for (const v of VARS) hourly[`${v}_${id}`] = Array(48).fill(v === 'precipitation' ? 0 : v.startsWith('cloud') ? 0 : 10);
-      hourly[`cloud_cover_${id}`][13] = 100;
-      hourly[`shortwave_radiation_${id}`][14] = 0.95 * clearSky(new Date(2026, 10, 2, 13), new Date(2026, 10, 2, 14), 52.37, 4.9).ghi;
+      for (const i of [12, 13, 14]) hourly[`cloud_cover_${id}`][i] = 100;
+      const sw = (hr, f) => { hourly[`shortwave_radiation_${id}`][hr + 1] = f * clearSky(new Date(2026, 10, 2, hr), new Date(2026, 10, 2, hr + 1), 52.37, 4.9).ghi; };
+      sw(12, 0.95); sw(13, 0.7); sw(14, 0.4);
       state.loc = { name: 'x', lat: 52.37, lon: 4.9 };
       state.forecast = parseForecast({ latitude: 52.37, longitude: 4.9, hourly }, new Date(2026, 10, 2, 9, 5));
-      const H = state.forecast.models.harmonie;
-      eq(H.instant.find(r => r.t.getHours() === 13).cloud_cover, 50, 'bewolking 13:00 gladgemaakt');
-      eq(hourIcons(H).find(x => x.hour.getHours() === 13).kind, 'clear', 'uur 13–14 zonnig');
-      eq(weatherAt(new Date(2026, 10, 2, 13, 10)).cloud, 0, 'weatherAt volgt de zon');
+      const H = state.forecast.models.harmonie, kindAt = hr => hourIcons(H).find(x => x.hour.getHours() === hr).kind;
+      eq(H.instant.find(r => r.t.getHours() === 13).cloud_cover, 100, 'bewolking 13:00 gladgemaakt');
+      eq(kindAt(12), 'partly', '75 % met volop zon'); eq(kindAt(13), 'thin', '100 % met 70 % zon'); eq(kindAt(14), 'cloud', '75 % met 40 % zon');
+      const w = weatherAt(new Date(2026, 10, 2, 13, 10)); eq(w.kind, 'thin'); eq(w.cloud, 50, 'grijstint: sluier telt half');
     } finally { state.forecast = saved; state.loc = savedLoc; }
   });
   test('ensemble: kans = aandeel leden ≥ 0,1 mm; band = 10/50/90-percentiel; staaf hoort bij uur ervoor', () => {
@@ -2701,7 +2760,7 @@ function runTests() {
     } finally { state.forecast = saved.f; state.obs = saved.o; state.ens = saved.e; state.ecmwf = saved.c; state.tab = saved.t; state.day = saved.d; render(); }
   });
   test('week: mediaan-icoon bij even aantal: halverwege, halven naar boven', () => {
-    eq(medianKind([0, 0, 2]), 'clear'); eq(medianKind([0, 2]), 'partly'); eq(medianKind([1, 2]), 'cloud'); eq(medianKind([3, 0, 3]), 'rain'); eq(medianKind([]), null);
+    eq(medianKind([0, 0, 2]), 'clear'); eq(medianKind([0, 2]), 'partly'); eq(medianKind([1, 2]), 'thin', 'half bewolkt en dun: dun'); eq(medianKind([1, 3]), 'thin'); eq(medianKind([4, 0, 4]), 'rain'); eq(medianKind([]), null);
   });
   test('ECMWF: per lid een dag, dan mediaan over de leden; 25/75 % als band; kans = deel natte leden', () => {
     const json = mkEnsJson(3, 3, ECMWF_VARS, (v, m, i) =>
