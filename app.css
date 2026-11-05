@@ -287,6 +287,57 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .tab svg { width: 26px; height: 26px; }
 .tab[aria-pressed="true"] { color: var(--tint); }
 
+/* ---------- week ---------- */
+.card.hours { padding: 4px 0 8px; overflow: hidden; }
+.hour-strip:active { opacity: 0.75; }
+.hour-strip:focus-visible, .rain-row:focus-visible { outline: 2px solid var(--tint); outline-offset: -2px; border-radius: 10px; }
+.rain-row {
+  display: flex; align-items: center; gap: 6px; width: 100%; padding: 6px 12px 7px 14px;
+  border-bottom: 1px solid var(--separator); font-size: 15px; font-weight: 500; color: var(--label-2); text-align: left;
+}
+.rain-row:active { background: var(--tint-wash); }
+.rain-row .drop { width: 9px; height: 11px; fill: var(--label-3); flex: none; }
+.rain-row.wet .drop { fill: var(--s1); }
+.rain-row.wet .rt { color: var(--label); }
+.rain-row .rt { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rain-row .spark { width: 96px; height: 16px; flex: none; }
+.rain-row .spark .base { stroke: var(--separator); stroke-width: 1; }
+.rain-row .spark rect { fill: var(--s1); }
+.rain-row .chev { width: 16px; height: 16px; color: var(--label-3); flex: none; }
+.back-link {
+  display: inline-flex; align-items: center; gap: 2px; margin: 10px 0 -4px -6px; padding: 4px 8px 4px 2px;
+  font-size: 15px; font-weight: 500; color: var(--tint); border-radius: 999px;
+}
+.back-link .ico { width: 18px; height: 18px; }
+.back-link:active { background: var(--tint-wash); }
+.hour-strip { display: flex; overflow-x: auto; padding: 8px 6px 0; cursor: pointer; scrollbar-width: none; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }
+.hour-strip::-webkit-scrollbar { display: none; }
+.hour { flex: 0 0 46px; display: flex; flex-direction: column; align-items: center; gap: 3px; font-variant-numeric: tabular-nums; }
+.hour .hl { font-size: 13px; font-weight: 500; color: var(--label-2); }
+.hour .wicon-big { width: 26px; height: 26px; overflow: visible; }
+.hour .ht { font-size: 15px; font-weight: 500; }
+.week-list { list-style: none; margin: 0; padding: 0; }
+.week-row {
+  display: grid; grid-template-columns: 4.6em 46px 2.2em 1fr 2.2em; align-items: center; gap: 8px;
+  min-height: 48px; padding: 4px 0; border-top: 1px solid var(--separator);
+  font-size: 17px; font-variant-numeric: tabular-nums;
+}
+.week-row:first-child { border-top: 0; }
+.week-row.open { cursor: pointer; }
+.week-row.open:active { background: var(--tint-wash); }
+.week-row.open:focus-visible { outline: 2px solid var(--tint); outline-offset: -2px; border-radius: 10px; }
+.week-row .d { font-weight: 500; }
+.week-row .ic { display: flex; flex-direction: column; align-items: center; }
+.week-row .ic .wicon-big { width: 30px; height: 30px; overflow: visible; }
+.week-row .mm { display: flex; align-items: center; gap: 2px; font-size: 11px; font-weight: 600; color: var(--s1); line-height: 1.1; white-space: nowrap; }
+.week-row .mm .drop { width: 7px; height: 9px; fill: currentColor; flex: none; }
+.week-row .mn { color: var(--label-3); text-align: right; }
+.week-row .mx { text-align: right; }
+.week-bar { position: relative; height: 5px; border-radius: 3px; background: var(--separator); }
+.week-bar .fill, .week-bar .band { position: absolute; top: 0; bottom: 0; border-radius: 3px; }
+.week-bar .band { opacity: 0.3; }
+.week-bar .now { position: absolute; top: 50%; width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px; border-radius: 50%; background: var(--label); box-shadow: 0 0 0 2px var(--card); }
+
 /* ---------- sheet ---------- */
 .sheet-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.35); z-index: 20; }
 .sheet {
