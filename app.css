@@ -305,6 +305,19 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .tab svg { width: 26px; height: 26px; }
 .tab[aria-pressed="true"] { color: var(--tint); }
 
+/* ---------- swipe from the left edge = back ---------- */
+/* the page follows the finger; under it, where it slides away, says where you go back to */
+.screen.swiping { background: var(--bg); box-shadow: -1px 0 0 var(--separator), -8px 0 24px rgba(0, 0, 0, 0.12); will-change: transform; }
+.screen.settling { transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.swipe-back {
+  position: absolute; left: 10px; top: 50%; margin-top: -18px; height: 36px;
+  display: flex; align-items: center; gap: 2px; padding: 0 12px 0 6px; border-radius: 999px;
+  background: var(--card); color: var(--tint); font-size: 15px; font-weight: 500;
+  opacity: 0; pointer-events: none;
+}
+.swipe-back[hidden] { display: none; }
+.swipe-back .ico { width: 18px; height: 18px; }
+
 /* ---------- week ---------- */
 .card.hours { padding: 4px 0 8px; overflow: hidden; }
 .hour-strip:active { opacity: 0.75; }
