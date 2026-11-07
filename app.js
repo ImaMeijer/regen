@@ -898,12 +898,13 @@ const b = txt => { const n = h('b', null, txt); return n; };
 const DEFAULT_LOC = { name: 'Amsterdam', admin: 'Noord-Holland', lat: 52.37, lon: 4.90 };
 const HORIZON_MIN = 6; // uren
 /* horizon: hoeveel uur vooruit de 2,5-daagse grafieken tonen, altijd vanaf nu; null = alles tot de modelhorizon */
-const state = { loc: DEFAULT_LOC, tab: 'overview', nowcast: null, forecast: null, updated: null, rainModel: 'harmonie', errors: {}, horizon: null, fetched: {} };
+const state = { loc: DEFAULT_LOC, tab: 'overview', nowcast: null, forecast: null, updated: null, rainModel: 'harmonie', errors: {}, horizon: null, fetched: {}, proef: true };
 try {
   const l = JSON.parse(localStorage.getItem('regen.loc') || 'null');
   if (l && Number.isFinite(l.lat) && Number.isFinite(l.lon)) state.loc = l;
   const t = localStorage.getItem('regen.tab'); if (t && ['overview', 'temp', 'wind', 'cloud'].includes(t)) state.tab = t;
   const hz = parseFloat(localStorage.getItem('regen.horizon')); if (Number.isFinite(hz) && hz >= HORIZON_MIN) state.horizon = hz;
+  if (localStorage.getItem('regen.proef') === '0') state.proef = false; // the trial of UX-audit step 5, switched off under Info
 } catch (e) {}
 
 const nowcastUrl = (lat, lon) => `https://gpsgadget.buienradar.nl/data/raintext?lat=${lat.toFixed(2)}&lon=${lon.toFixed(2)}`;
@@ -1296,6 +1297,11 @@ function render() {
   const c = $('content');
   c.classList.toggle('ov', placeTitle);
   const screen = $('screen');
+  // trial (UX-audit step 5): neutral controls everywhere (CSS on :root.proef), the sky of now behind Overzicht
+  document.documentElement.classList.toggle('proef', !!state.proef);
+  const sky = placeTitle && state.proef;
+  screen.classList.toggle('sky', sky);
+  if (sky) screen.style.setProperty('--sky-now', skyNow()); else screen.style.removeProperty('--sky-now');
   const keepScroll = screen.scrollTop; // rebuilding the content must not move the page
   const minH = c.offsetHeight; c.style.minHeight = minH + 'px';
   c.textContent = '';
@@ -1607,6 +1613,58 @@ function topCard(c) {
   k.insertAdjacentHTML('beforeend', '<span class="strip-more" aria-hidden="true"><svg viewBox="0 0 12 16"><path d="M3.5 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>');
   c.appendChild(k);
 }
+/* ---- trial (UX-audit step 5): the weather in words, the sky of now behind the header ---- */
+const cap = s => s[0].toUpperCase() + s.slice(1);
+/* A moment in words: vannacht, vanochtend, vanmiddag, vanavond; morgenochtend …; zaterdagmiddag; in de nacht
+   naar zaterdag. Night is 0–6 h, morning 6–12, afternoon 12–18, evening 18–24. */
+function whenWords(t, now = new Date()) {
+  const hr = t.getHours(), part = hr < 6 ? 'nacht' : hr < 12 ? 'ochtend' : hr < 18 ? 'middag' : 'avond';
+  const tomorrow = new Date(now); tomorrow.setDate(now.getDate() + 1);
+  if (sameDay(t, now)) return 'van' + part;
+  if (sameDay(t, tomorrow)) return part === 'nacht' ? 'vannacht' : 'morgen' + part;
+  const wd = t.toLocaleDateString(nl, { weekday: 'long' });
+  return part === 'nacht' ? `in de nacht naar ${wd}` : wd + part;
+}
+/* What a friend would say (UX-audit C1), at most two sentences: first now (the sky and whether it rains), then
+   tomorrow, then the first wetter day after it (chance of 50 % or more, or a rain icon); "daarna droog" when
+   every later day stays under 20 %. Numbers stay round; the precise times are in the rain bar below. */
+function weatherLine(now = new Date()) {
+  const H = state.forecast && state.forecast.models && state.forecast.models.harmonie;
+  const kind = nowKind(now), night = sunAltitude(now, state.loc.lat, state.loc.lon) < SUN_RISESET;
+  const word = kind === 'clear' && night ? 'helder' : ICON_WORDS[kind];
+  const nr = nextRain(state.nowcast, H, state.ens, now);
+  const first = nr && nr.kind === 'radar' && nr.now ? 'Het regent nu.'
+    : nr && nr.kind === 'radar' ? `${cap(word)}, om ${fmtTime(nr.t)} regen.`
+    : nr && nr.kind === 'model' ? `${cap(word)}, ${whenWords(nr.t, now)} regen.`
+    : kind === 'rain' ? `${cap(word)}.`
+    : `${cap(word)} en droog.`;
+  const days = weekDays();
+  const tmw = new Date(now); tmw.setDate(now.getDate() + 1);
+  const i = days.findIndex(d => sameDay(d.day, tmw));
+  if (i < 0) return first;
+  const d1 = days[i];
+  const parts = [d1.kind === 'rain' ? `morgen regen, tot ${fmtNum(d1.mx, 0)}°` : `morgen ${ICON_WORDS[d1.kind]} tot ${fmtNum(d1.mx, 0)}°`];
+  const later = days.slice(i + 1);
+  const wet = later.find(d => (d.chance != null && d.chance >= 0.5) || d.kind === 'rain');
+  if (wet) parts.push(`${wet.day.toLocaleDateString(nl, { weekday: 'long' })} kans op regen`);
+  else if (later.length && later.every(d => d.chance != null && d.chance < 0.2)) parts.push('daarna droog');
+  return `${first} ${cap(parts.join(', '))}.`;
+}
+/* The sky of now as a colour, the way the charts tint their plot: the sun's altitude, greyed by the cloud
+   measured around (or the model's). For the header of Overzicht (UX-audit C2). */
+function skyNow(now = new Date()) {
+  const pal = skyPalette(), alt = sunAltitude(now, state.loc.lat, state.loc.lon);
+  let c = skyColor(alt, pal);
+  const f = state.obs && state.obs.sky != null ? state.obs.sky / 100 : cloudAt(now);
+  if (f != null) c = mix(c, pal.cloud, clamp((alt + 6) / 14, 0, 1) * 0.7 * f);
+  return `rgb(${c[0]},${c[1]},${c[2]})`;
+}
+/* The trial switch under Info: on by default, remembered on the phone. */
+function setProef(on) {
+  state.proef = on;
+  try { localStorage.setItem('regen.proef', on ? '1' : '0'); } catch (e) {}
+  render();
+}
 /* The weather of now at the top of Overzicht (UX-audit B1, direction A): the temperature large, what the sky
    does, feels-like and today's range (the same as the row "Vandaag" below), with the rain bar as its last line.
    The tile on Per uur stays as it is. Without a forecast only the rain bar. */
@@ -1634,9 +1692,31 @@ function nowCard(c) {
     if (range) parts.push(`vandaag ${fmtNum(range.mn, 0)}° tot ${fmtNum(range.mx, 0)}°`);
     // one line, so the week still fits: the station is on Temperatuur and Wind, here only measured or forecast
     parts.push(o && o.temp != null ? `gemeten ${fmtTime(o.time)}` : 'verwacht');
-    const feelEl = h('div', 'now-feel', parts.join(' · '));
-    if (o && o.temp != null) feelEl.title = `Gemeten ${fmtTime(o.time)} bij ${o.station} (${fmtNum(o.dist, 0)} km)`;
-    top.appendChild(feelEl);
+    const source = o && o.temp != null ? `Gemeten ${fmtTime(o.time)} bij ${o.station} (${fmtNum(o.dist, 0)} km)` : 'Verwacht, geen meting';
+    if (state.proef) {
+      // trial (UX-audit C1): the weather in one or two sentences instead of the feels-like line, which is on
+      // Temperatuur and in the row Vandaag as well; where the temperature comes from stays in the tooltip
+      const say = h('p', 'now-say', weatherLine(now));
+      say.title = `${source} · ${parts.join(' · ')}`;
+      top.appendChild(say);
+      // trial (UX-audit C3): a small tree with the wind of now; a tap opens Wind
+      const kmh = o && o.wind != null ? o.wind : r0 ? r0.wind_speed_10m : null;
+      const dir = o && o.wind != null ? o.dir : r0 ? r0.wind_direction_10m : null;
+      if (kmh != null) {
+        const b = beaufort(kmh);
+        const btn = h('button', 'now-tree'); btn.type = 'button';
+        btn.setAttribute('aria-label', `Wind ${fmtNum(kmh, 0)} km/u, ${b} Bft${dir != null ? ` uit ${compass(dir)}` : ''}. Open Wind`);
+        const svg = svgEl('svg', { viewBox: '8 4 84 100', 'aria-hidden': 'true' });
+        const g = makeTree(1); svg.appendChild(g); btn.appendChild(svg);
+        windTree(g, kmh, dir, null);
+        btn.addEventListener('click', () => document.querySelector('.tab[data-tab="wind"]').click());
+        top.appendChild(btn); top.classList.add('with-tree');
+      }
+    } else {
+      const feelEl = h('div', 'now-feel', parts.join(' · '));
+      feelEl.title = source;
+      top.appendChild(feelEl);
+    }
     k.appendChild(top);
   }
   k.appendChild(rainRow());
@@ -2275,6 +2355,18 @@ function renderInfo(c) {
       (state.updated ? `<br>laatste poging ${fmtTime(state.updated)}` : '')]);
     c.lastChild.querySelector('p').className = 'err';
   }
+  // the switch for the trial of UX-audit step 5, so the old and new look can be compared
+  const pv = h('section', 'card info proef-card');
+  const lab = h('label', 'switch-row');
+  const txt = h('span', 'switch-text');
+  txt.appendChild(h('span', 'switch-title', 'Proefversie: nieuwe weergave'));
+  txt.appendChild(h('span', 'switch-desc', 'Lucht achter de kop, het weer in een zin met een boompje, en knoppen in zwart-wit. Uit = de weergave van daarvoor.'));
+  lab.appendChild(txt);
+  const sw = h('input', 'switch'); sw.type = 'checkbox'; sw.setAttribute('role', 'switch'); sw.checked = !!state.proef; sw.id = 'proefSwitch';
+  sw.addEventListener('change', () => setProef(sw.checked));
+  lab.appendChild(sw);
+  pv.appendChild(lab);
+  c.appendChild(pv);
   const SEE = [
     'De app toont de verwachting voor de gekozen plaats. <b>Overzicht</b> draagt de naam van de plaats (tik erop om een andere te kiezen) en begint met het weer van nu: de temperatuur, het weerbeeld, hoe koud het voelt en de laagste en hoogste temperatuur van vandaag. Daaronder de regenregel: hoe lang het droog blijft, of wanneer het gaat regenen; komt er regen aan, dan kleurt de regel blauw met een mini-radar per 5 minuten. Daaronder het weer per uur en de komende zeven dagen, met per dag het weerbeeld, de laagste en hoogste temperatuur en de kans op regen. Tik op de regenbalk voor <b>Regen</b> (de radar voor de komende 2 uur en de neerslag per uur met de kans op regen) en op de uurstrook voor <b>Per uur</b>, dat temperatuur en weerbeeld per uur naast elkaar zet. Tik op een dag in de lijst voor dezelfde pagina voor alleen die dag (vandaag de hele dag vanaf middernacht, met een stippellijn op nu; de uren daarvoor zijn wat het model verwachtte, geen metingen); voor de dagen na morgen komt die uit het ECMWF-ensemble: de lijn is de middelste van de 51 berekeningen en de band laat zien waar 90% van de berekeningen zit (de 5% hoogste en de 5% laagste vallen erbuiten, zoals de lichte band van de KNMI-pluim), voor temperatuur én regen; bij regen noemt de tooltip die band gewoon als "0,0 tot 0,4 mm", omdat de middelste waarde bij buien bijna altijd 0 is, en de boompjes tonen de wind van de middelste berekening; "‹ Overzicht" linksboven brengt je terug. Trek een pagina bovenaan omlaag om te verversen. <b>Temperatuur</b>, <b>Wind</b> en <b>Bewolking</b> tonen elk hun eigen verloop.',
     'Zoomen: spreid twee vingers op een grafiek om in te zoomen, knijp ze samen om weer verder vooruit te kijken (tot 48 uur). De grafiek begint altijd bij nu; de titel van de kaart toont hoeveel uur je ziet en de keuze wordt onthouden. Sleep met één vinger over een grafiek om de waarden van dat moment te zien; de stippellijn volgt je vinger.',
@@ -2725,6 +2817,8 @@ let toastTimer = null;
 function toast(msg) { const t = $('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 2500); }
 let resizeTimer = null;
 window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(render, 150); });
+// the sky of now and the charts' tints are computed from the theme's colours: redraw when light/dark switches
+try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => render()); } catch (e) {}
 /* Op de telefoon staan timers stil zolang de app in de achtergrond zit. Bij terugkomen direct verversen
    als de data ouder is dan 2 minuten, zodat je nooit naar een oude nowcast kijkt. */
 document.addEventListener('visibilitychange', () => {
@@ -3633,6 +3727,51 @@ function runTests() {
     for (const el of document.querySelectorAll('#phone *:not(svg *):not(.tests *)')) {
       if (!el.childNodes.length || ![...el.childNodes].some(n => n.nodeType === 3 && n.textContent.trim())) continue;
       ok(sizes.has(cs(el).fontSize), `lettergrootte buiten de schaal: ${cs(el).fontSize} op ${el.className || el.tagName}`);
+    }
+  });
+  test('v25: momenten in woorden', () => {
+    const n = new Date(2026, 10, 7, 10, 0); // za 7 nov 10:00
+    eq(whenWords(new Date(2026, 10, 7, 15), n), 'vanmiddag'); eq(whenWords(new Date(2026, 10, 7, 20), n), 'vanavond');
+    eq(whenWords(new Date(2026, 10, 8, 3), n), 'vannacht'); eq(whenWords(new Date(2026, 10, 8, 9), n), 'morgenochtend');
+    eq(whenWords(new Date(2026, 10, 9, 14), n), 'maandagmiddag'); eq(whenWords(new Date(2026, 10, 10, 2), n), 'in de nacht naar dinsdag');
+  });
+  test('v25: het weer in hooguit twee zinnen, eerst nu, dan morgen en de eerste natte dag', () => {
+    const saved = { f: state.forecast, o: state.obs, e: state.ens, c: state.ecmwf, n: state.nowcast };
+    try {
+      state.forecast = withDays(mkJson(), NOW, 52.37, 4.9); state.obs = null; state.ens = null; state.nowcast = null;
+      const days = state.forecast.days, d1 = days[1];
+      state.ecmwf = { days: [{ day: new Date(2026, 10, 2), kind: 'cloud', mn: 3, mx: 8, chance: 0.1, n: 51 }, { day: new Date(2026, 10, 3), kind: 'rain', mn: 4, mx: 9, chance: 0.7, n: 51 }] };
+      const s = weatherLine(new Date(NOW));
+      ok(/^[A-Z]/.test(s) && s.endsWith('.'), 'een zin: ' + s);
+      ok((s.match(/\./g) || []).length <= 2, 'hooguit twee zinnen: ' + s);
+      ok(s.includes(`Morgen`) && s.includes(`${fmtNum(d1.mx, 0)}°`), 'morgen met de hoogste temperatuur: ' + s);
+      ok(s.includes('dinsdag kans op regen'), 'de eerste natte dag: ' + s);
+      state.ecmwf = { days: [{ day: new Date(2026, 10, 2), kind: 'clear', mn: 3, mx: 8, chance: 0.05, n: 51 }] };
+      ok(weatherLine(new Date(NOW)).endsWith('daarna droog.'), 'daarna droog');
+    } finally { state.forecast = saved.f; state.obs = saved.o; state.ens = saved.e; state.ecmwf = saved.c; state.nowcast = saved.n; }
+  });
+  test('v25: schakelaar proefversie: zin, boom, lucht en neutrale knoppen aan en uit', () => {
+    const saved = { f: state.forecast, o: state.obs, e: state.ens, c: state.ecmwf, t: state.tab, p: state.proef, n: nav.stack };
+    try {
+      state.forecast = withDays(mkJson(), NOW, 52.37, 4.9); state.obs = null; state.ens = null; state.ecmwf = null;
+      nav.stack = []; state.tab = 'overview'; state.proef = true; render();
+      const nc = $('content').querySelector('.now-card');
+      ok(nc.querySelector('.now-say') && !nc.querySelector('.now-feel'), 'zin in plaats van voelt-als');
+      ok(nc.querySelector('.now-tree svg .treeg'), 'boompje'); ok($('screen').classList.contains('sky'), 'lucht achter de kop');
+      ok(/^rgb\(\d+,\d+,\d+\)$/.test($('screen').style.getPropertyValue('--sky-now')), 'luchtkleur gezet');
+      ok(document.documentElement.classList.contains('proef'), 'neutrale knoppen');
+      eq(getComputedStyle(document.querySelector('.tab[aria-pressed="true"]')).color, getComputedStyle(document.body).color, 'actieve tab in labelkleur');
+      state.tab = 'temp'; render(); ok(!$('screen').classList.contains('sky'), 'lucht alleen op Overzicht');
+      state.tab = 'info'; render(); const sw = $('proefSwitch'); ok(sw && sw.checked, 'schakelaar onder Info, aan');
+      sw.checked = false; sw.dispatchEvent(new Event('change')); eq(state.proef, false);
+      ok(!document.documentElement.classList.contains('proef'));
+      state.tab = 'overview'; render();
+      const nc2 = $('content').querySelector('.now-card');
+      ok(nc2.querySelector('.now-feel') && !nc2.querySelector('.now-say') && !nc2.querySelector('.now-tree'), 'uit: zoals daarvoor');
+      ok(!$('screen').classList.contains('sky'));
+    } finally {
+      state.forecast = saved.f; state.obs = saved.o; state.ens = saved.e; state.ecmwf = saved.c; state.tab = saved.t; nav.stack = saved.n;
+      state.proef = saved.p; try { localStorage.setItem('regen.proef', saved.p ? '1' : '0'); } catch (e) {} render();
     }
   });
 
