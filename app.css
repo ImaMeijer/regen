@@ -339,7 +339,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .week-list { list-style: none; margin: 0; padding: 0; }
 .week-row {
   display: grid; grid-template-columns: 4.6em 46px 2.2em 1fr 2.2em; align-items: center; gap: 8px;
-  min-height: 48px; padding: 4px 0; border-top: 1px solid var(--separator);
+  min-height: 44px; padding: 2px 0; border-top: 1px solid var(--separator); /* Apple's row height: seven days and the card of now fit one screen */
   font-size: 17px; font-variant-numeric: tabular-nums;
 }
 .week-row:first-child { border-top: 0; }
@@ -489,3 +489,31 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 }
 .error-state button:disabled { opacity: 0.6; }
 .card.info p.err { color: var(--label-2); font-size: 13px; font-variant-numeric: tabular-nums; }
+
+/* ---------- v21: the place as title, the weather of now on top (UX-audit B1, B2, direction A) ---------- */
+.title-btn { display: inline-flex; align-items: center; gap: 4px; font: inherit; letter-spacing: inherit; text-align: left; max-width: calc(100% - 40px); }
+.title-btn span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.title-btn .chev { width: 20px; height: 20px; color: var(--label-3); margin-top: 4px; }
+.title-btn:active { opacity: 0.6; }
+.top.place .info-btn { top: calc(17px + env(safe-area-inset-top)); }
+.now-card { padding: 10px 0 0; overflow: hidden; }
+.now-top { padding: 0 14px 8px; }
+
+.now-line { display: flex; align-items: center; gap: 10px; }
+.now-temp { font-size: 48px; font-weight: 300; letter-spacing: -0.03em; line-height: 1; font-variant-numeric: tabular-nums; }
+.now-cond { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+.now-feel { font-size: 13px; color: var(--label-2); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.now-icon { width: 34px; height: 34px; overflow: visible; flex: none; }
+.now-card .rain-row { border-top: 1px solid var(--separator); border-bottom: 0; min-height: 36px; }
+.card.hours { padding-top: 0; }
+.hour.now .hl { color: var(--label); font-weight: 600; }
+.hour.sun .hl { font-size: 12px; }
+.hour.sun .ht { font-size: 13px; color: var(--label-2); line-height: 1.55; }
+.sun-ev .disc { fill: var(--sun); }
+.sun-ev .ray { fill: none; stroke: var(--sun); stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+/* Overzicht must fit one iPhone screen with the card of now (393 × 852 minus status bar and home indicator):
+   a little less air between the cards and Apple's small section header above the days */
+#content.ov > .card { margin-top: 12px; }
+.top.place { padding-bottom: 2px; }
+.week-card .card-head { margin-bottom: 2px; }
+.week-card .card-head h2 { font-size: 13px; font-weight: 600; color: var(--label-2); text-transform: uppercase; letter-spacing: 0.02em; }

@@ -1258,6 +1258,7 @@ function pageTitle() {
   return wd[0].toUpperCase() + wd.slice(1);
 }
 
+const SUNLINE_TABS = new Set(['hours', 'day']); // the pages with hours of one day, where twilight matters
 function render() {
   hideTooltip();
   $('title').textContent = pageTitle();
@@ -1266,13 +1267,31 @@ function render() {
     : stale.all ? `offline · gegevens van ${fmtWhen(stale.since)}`
     : stale.parts.length === 1 ? `${SOURCE_NAMES[stale.parts[0].key]} van ${fmtWhen(stale.since)}`
     : `deels verouderd · gegevens van ${fmtWhen(stale.since)}`;
-  $('subtitle').textContent = state.tab === 'info' ? 'Over deze app en haar bronnen' : state.updated ? `${state.loc.name}${state.loc.admin ? ', ' + state.loc.admin : ''} · ${when}` : state.loc.name;
+  // Overzicht says where you are, not which tab you chose (UX-audit B2): the place is the title and the button
+  // to change it, the province and "bijgewerkt" sit below. The other pages keep their own title.
+  const placeTitle = state.tab === 'overview';
+  $('top').classList.toggle('place', placeTitle);
+  $('locBtn').hidden = placeTitle;
+  if (placeTitle) {
+    const t = $('title'); t.textContent = '';
+    const btn = h('button', 'title-btn'); btn.type = 'button'; btn.setAttribute('aria-label', `${state.loc.name}, locatie wijzigen`);
+    btn.appendChild(h('span', null, state.loc.name));
+    btn.insertAdjacentHTML('beforeend', '<svg class="ico chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>');
+    btn.addEventListener('click', openSheet);
+    t.appendChild(btn);
+  }
+  $('subtitle').textContent = state.tab === 'info' ? 'Over deze app en haar bronnen'
+    : placeTitle ? [state.loc.admin, when].filter(Boolean).join(' · ') || ' '
+    : state.updated ? `${state.loc.name}${state.loc.admin ? ', ' + state.loc.admin : ''} · ${when}` : state.loc.name;
   const infoBtn = $('infoBtn'); if (infoBtn) infoBtn.hidden = state.tab === 'info';
-  $('sunline').hidden = state.tab === 'info';
-  document.title = `${pageTitle()} · ${state.loc.name}`;
+  // sunrise and sunset are cells in the hourly strip now; the full line with twilight only where the hours are
+  const sunline = SUNLINE_TABS.has(state.tab);
+  $('sunline').hidden = !sunline;
+  document.title = `${placeTitle ? 'Weer' : pageTitle()} · ${state.loc.name}`;
   for (const btn of document.querySelectorAll('.tab')) btn.setAttribute('aria-pressed', String(btn.dataset.tab === (TAB_OF[state.tab] || state.tab)));
-  if (state.tab !== 'info') renderSunline();
+  if (sunline) renderSunline();
   const c = $('content');
+  c.classList.toggle('ov', placeTitle);
   const screen = $('screen');
   const keepScroll = screen.scrollTop; // rebuilding the content must not move the page
   const minH = c.offsetHeight; c.style.minHeight = minH + 'px';
@@ -1576,10 +1595,46 @@ const dayName = d => { const wd = d.toLocaleDateString(nl, { weekday: 'short' })
 const WEEK_HOURS = 48;
 /* Top card of Overzicht: the rain bar (to the Regen page) above the hourly strip (to Per uur). */
 function topCard(c) {
-  const k = h('section', 'card hours');
-  k.appendChild(rainRow());
+  nowCard(c);
   const strip = hourStrip();
-  if (strip) k.appendChild(strip);
+  if (!strip) return;
+  const k = h('section', 'card hours');
+  k.appendChild(strip);
+  c.appendChild(k);
+}
+/* The weather of now at the top of Overzicht (UX-audit B1, direction A): the temperature large, what the sky
+   does, feels-like and today's range (the same as the row "Vandaag" below), with the rain bar as its last line.
+   The tile on Per uur stays as it is. Without a forecast only the rain bar. */
+function nowCard(c) {
+  const k = h('section', 'card now-card');
+  const T = tempModel(), o = state.obs, now = new Date();
+  const r0 = T && T.instant[0];
+  const temp = o && o.temp != null ? o.temp : r0 ? r0.temperature_2m : null;
+  if (temp != null) {
+    const kind = nowKind(now), night = sunAltitude(now, state.loc.lat, state.loc.lon) < SUN_RISESET;
+    const word = kind === 'clear' && night ? 'helder' : ICON_WORDS[kind];
+    const top = h('div', 'now-top');
+    const line = h('div', 'now-line');
+    line.appendChild(h('span', 'now-temp', `${fmtNum(temp, 0)}°`));
+    const icon = svgEl('svg', { class: 'wicon-big now-icon', viewBox: '-10 -10 20 20', 'aria-hidden': 'true' });
+    icon.appendChild(weatherIcon(0, 0, kind, night));
+    line.appendChild(icon);
+    line.appendChild(h('span', 'now-cond', word[0].toUpperCase() + word.slice(1)));
+    top.appendChild(line);
+    const feel = o && o.feel != null ? o.feel : r0 ? r0.apparent_temperature : null;
+    const d0 = weekDays().find(d => sameDay(d.day, now));
+    const range = d0 || (T ? todayRange(T) : null);
+    const parts = [];
+    if (feel != null) parts.push(`voelt als ${fmtNum(feel, 0)}°`);
+    if (range) parts.push(`vandaag ${fmtNum(range.mn, 0)}° tot ${fmtNum(range.mx, 0)}°`);
+    // one line, so the week still fits: the station is on Temperatuur and Wind, here only measured or forecast
+    parts.push(o && o.temp != null ? `gemeten ${fmtTime(o.time)}` : 'verwacht');
+    const feelEl = h('div', 'now-feel', parts.join(' · '));
+    if (o && o.temp != null) feelEl.title = `Gemeten ${fmtTime(o.time)} bij ${o.station} (${fmtNum(o.dist, 0)} km)`;
+    top.appendChild(feelEl);
+    k.appendChild(top);
+  }
+  k.appendChild(rainRow());
   c.appendChild(k);
 }
 /* Rain bar: what the Regen page's tile says (radar first, then HARMONIE) beside a mini radar of the coming
@@ -1617,13 +1672,16 @@ function rainRow() {
    of ICON-D2, for as long as the temperature model reaches (at most WEEK_HOURS). The first slot is now, with
    the tile's measured weather and temperature; midnight carries the name of the new day. A tap opens Per uur;
    a swipe through the strip scrolls and does not count as a tap. */
-function hourStrip() {
+function hourStrip(now = new Date()) {
   const H = state.forecast && state.forecast.models && state.forecast.models.harmonie, T = tempModel();
   if (!H || !H.applicable || !T) return null;
-  const now = new Date();
   const strip = h('div', 'hour-strip');
   strip.setAttribute('aria-label', 'Weer per uur, open de uurgrafiek');
-  for (const ic of hourIcons(H).slice(0, WEEK_HOURS)) {
+  const icons = hourIcons(H).slice(0, WEEK_HOURS);
+  // sunrise and sunset as cells of their own, after the hour they fall in (as Apple does; UX-audit B2)
+  const lastHour = icons.length ? new Date(icons[icons.length - 1].hour.getTime() + HOUR) : now;
+  const sunEv = solarEvents(now, lastHour, state.loc.lat, state.loc.lon).filter(e => (e.kind === 'sunrise' || e.kind === 'sunset') && e.t > now);
+  for (const ic of icons) {
     const r = rowAt(T, ic.hour);
     if (!r || r.temperature_2m == null) break;
     const first = !strip.children.length;
@@ -1631,7 +1689,7 @@ function hourStrip() {
     const night = first ? sunAltitude(now, state.loc.lat, state.loc.lon) < SUN_RISESET : ic.night;
     const temp = first && state.obs && state.obs.temp != null ? state.obs.temp : r.temperature_2m;
     const label = first ? 'Nu' : ic.hour.getHours() === 0 ? dayName(ic.hour) : String(ic.hour.getHours()).padStart(2, '0');
-    const cell = h('div', 'hour');
+    const cell = h('div', first ? 'hour now' : 'hour');
     cell.setAttribute('aria-label', `${label}: ${kind === 'clear' && night ? 'helder' : ICON_WORDS[kind]}, ${fmtNum(temp, 0)} graden`);
     cell.appendChild(h('span', 'hl', label));
     const svg = svgEl('svg', { class: 'wicon-big', viewBox: '-10 -10 20 20', 'aria-hidden': 'true' });
@@ -1639,6 +1697,8 @@ function hourStrip() {
     cell.appendChild(svg);
     cell.appendChild(h('span', 'ht', `${fmtNum(temp, 0)}°`));
     strip.appendChild(cell);
+    const slotEnd = ic.hour.getTime() + HOUR;
+    while (sunEv.length && sunEv[0].t.getTime() < slotEnd) strip.appendChild(sunCell(sunEv.shift()));
   }
   if (!strip.children.length) return null;
   strip.tabIndex = 0; strip.setAttribute('role', 'button');
@@ -1646,6 +1706,19 @@ function hourStrip() {
   strip.addEventListener('click', open);
   strip.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
   return strip;
+}
+/* A cell of the hourly strip for sunrise or sunset: the time, the sun on the horizon with an arrow, "op"/"onder". */
+function sunCell(ev) {
+  const up = ev.kind === 'sunrise';
+  const cell = h('div', 'hour sun');
+  cell.setAttribute('aria-label', `Zon ${up ? 'op' : 'onder'} om ${fmtTime(ev.t)}`);
+  cell.appendChild(h('span', 'hl', fmtTime(ev.t)));
+  const svg = svgEl('svg', { class: 'wicon-big sun-ev', viewBox: '-10 -10 20 20', 'aria-hidden': 'true' });
+  svg.innerHTML = '<path class="disc" d="M-4.6 3a4.6 4.6 0 0 1 9.2 0z"/><path class="ray" d="M-7.5 3h15"/>' +
+    (up ? '<path class="ray" d="M0-3.6v-5M-2.2-6.6L0-8.8l2.2 2.2"/>' : '<path class="ray" d="M0-8.8v5M-2.2-5.8L0-3.6l2.2-2.2"/>');
+  cell.appendChild(svg);
+  cell.appendChild(h('span', 'ht', up ? 'op' : 'onder'));
+  return cell;
 }
 /* "‹ Overzicht" above a page that is reached from Overzicht instead of from the tab bar. */
 function backLink(c) {
@@ -1728,7 +1801,7 @@ function renderWeek(c) {
     if (!state.errors.forecast) c.appendChild(h('p', 'empty', 'Geen dagverwachting voor deze locatie.'));
     return;
   }
-  const k = h('section', 'card');
+  const k = h('section', 'card week-card');
   const head = h('div', 'card-head'); head.appendChild(h('h2', null, 'Komende dagen')); k.appendChild(head);
   const lo = Math.floor(Math.min(...days.map(d => d.mnLo != null ? d.mnLo : d.mn)));
   const hi = Math.ceil(Math.max(...days.map(d => d.mxHi != null ? d.mxHi : d.mx)));
@@ -2170,11 +2243,11 @@ function renderInfo(c) {
     c.lastChild.querySelector('p').className = 'err';
   }
   sec('Wat je ziet', [
-    'De app toont de verwachting voor de gekozen plaats. <b>Overzicht</b> begint met een regenbalk: hoe lang het droog blijft, of wanneer het gaat regenen; komt er regen aan, dan kleurt de balk blauw met een mini-radar per 5 minuten. Daaronder het weer per uur en de komende zeven dagen, met per dag het weerbeeld, de laagste en hoogste temperatuur en de kans op regen. Tik op de regenbalk voor <b>Regen</b> (de radar voor de komende 2 uur en de neerslag per uur met de kans op regen) en op de uurstrook voor <b>Per uur</b>, dat temperatuur en weerbeeld per uur naast elkaar zet. Tik op een dag in de lijst voor dezelfde pagina voor alleen die dag; voor de dagen na morgen komt die uit het ECMWF-ensemble: de lijn is de middelste van de 51 berekeningen en de band laat zien waar 90% van de berekeningen zit (de 5% hoogste en de 5% laagste vallen erbuiten, zoals de lichte band van de KNMI-pluim), voor temperatuur én regen; bij regen noemt de tooltip die band gewoon als "0,0 tot 0,4 mm", omdat de middelste waarde bij buien bijna altijd 0 is, en de boompjes tonen de wind van de middelste berekening; "‹ Overzicht" brengt je terug. <b>Temperatuur</b>, <b>Wind</b> en <b>Bewolking</b> tonen elk hun eigen verloop.',
+    'De app toont de verwachting voor de gekozen plaats. <b>Overzicht</b> draagt de naam van de plaats (tik erop om een andere te kiezen) en begint met het weer van nu: de temperatuur, het weerbeeld, hoe koud het voelt en de laagste en hoogste temperatuur van vandaag. Daaronder de regenregel: hoe lang het droog blijft, of wanneer het gaat regenen; komt er regen aan, dan kleurt de regel blauw met een mini-radar per 5 minuten. Daaronder het weer per uur en de komende zeven dagen, met per dag het weerbeeld, de laagste en hoogste temperatuur en de kans op regen. Tik op de regenbalk voor <b>Regen</b> (de radar voor de komende 2 uur en de neerslag per uur met de kans op regen) en op de uurstrook voor <b>Per uur</b>, dat temperatuur en weerbeeld per uur naast elkaar zet. Tik op een dag in de lijst voor dezelfde pagina voor alleen die dag; voor de dagen na morgen komt die uit het ECMWF-ensemble: de lijn is de middelste van de 51 berekeningen en de band laat zien waar 90% van de berekeningen zit (de 5% hoogste en de 5% laagste vallen erbuiten, zoals de lichte band van de KNMI-pluim), voor temperatuur én regen; bij regen noemt de tooltip die band gewoon als "0,0 tot 0,4 mm", omdat de middelste waarde bij buien bijna altijd 0 is, en de boompjes tonen de wind van de middelste berekening; "‹ Overzicht" brengt je terug. <b>Temperatuur</b>, <b>Wind</b> en <b>Bewolking</b> tonen elk hun eigen verloop.',
     'Zoomen: spreid twee vingers op een grafiek om in te zoomen, knijp ze samen om weer verder vooruit te kijken (tot 48 uur). De grafiek begint altijd bij nu; de titel van de kaart toont hoeveel uur je ziet en de keuze wordt onthouden. Sleep met één vinger over een grafiek om de waarden van dat moment te zien; de stippellijn volgt je vinger.',
     'De achtergrond van elke grafiek volgt de zon: warm bij daglicht, grijzer naarmate er meer bewolking is, donker in de nacht, met schemer ertussen. De zonnetjes boven de grafiek staan op zonsopkomst en -ondergang en tonen het weerbeeld van dat moment.',
     'Het <b>weerbeeld</b> van een verwacht uur (zonnig, half bewolkt, dunne bewolking, bewolkt, regen) komt uit de bewolking van het model: minder dan 30% is zonnig, 30 tot 70% half bewolkt. Is de lucht (bijna) dicht, dan kijkt de app hoeveel zon er nog doorkomt, vergeleken met een heldere hemel: veel zon betekent losse wolken (half bewolkt), een flink deel betekent een sluier van dunne, hoge wolken (dunne bewolking: zon boven drie strepen) en weinig zon een dik wolkendek (bewolkt). Bij lage zon en \'s nachts beslissen de lagen: alleen hoge wolken is dunne bewolking. Vanaf 0,1 mm in het uur is het regen. Het weerbeeld van nu in de tegel komt uit de metingen.',
-    'Bovenaan <b>Overzicht</b> staat het weer per uur, zo ver als ICON-D2 vooruit rekent (tot 48 uur): het icoontje met dezelfde regels als de uurrij op Per uur en de temperatuur van ICON-D2. Nu komt, net als in de tegel van Per uur, uit de metingen; om middernacht staat de naam van de nieuwe dag. Veeg opzij voor de volgende uren; tik erop voor Per uur.',
+    'Bovenaan <b>Overzicht</b> staat het weer per uur, zo ver als ICON-D2 vooruit rekent (tot 48 uur): het icoontje met dezelfde regels als de uurrij op Per uur en de temperatuur van ICON-D2. Nu komt, net als de kaart van nu, uit de metingen; om middernacht staat de naam van de nieuwe dag, en zonsopkomst en -ondergang staan als eigen vakje tussen de uren. Schemer staat op Per uur en de dagpagina's. Veeg opzij voor de volgende uren; tik erop voor Per uur.',
     'Het <b>weerbeeld van een dag</b> in Overzicht kijkt alleen naar de uren dat het licht is. Elk licht uur krijgt zijn eigen icoontje, met dezelfde regels als de uurrij op Per uur, en de dag krijgt het middelste daarvan (de mediaan). Een strak blauwe dag die in de laatste twee lichte uren dichttrekt, blijft zo een zonnige dag. Laagste en hoogste temperatuur gaan over de hele dag. Het getal met de druppel onder het icoontje is de kans op een natte dag: het deel van de ensembleberekeningen met minstens 0,5 mm in de lichte uren van die dag, getoond vanaf 10%; regen in de nacht telt niet mee, net als bij het icoontje. De balk loopt van laagste naar hoogste temperatuur op de schaal van alle dagen samen; de stip is de temperatuur van nu.',
     'De dagen in Overzicht gebruiken zolang het kan dezelfde modellen als de rest van de app: HARMONIE voor het weerbeeld, ICON-D2 voor de temperatuur en het ICON-D2-ensemble voor de kans, meestal vandaag en morgen. Voor de dagen daarna komt alles uit het <b>ECMWF-ensemble</b>, dat ook achter de pluim van het KNMI zit: 51 berekeningen op een raster van 25 km. Elke berekening krijgt zijn eigen dag met dezelfde regels; de dag krijgt het middelste icoontje van de 51 en de middelste laagste en hoogste temperatuur, zoals de pluim. Het vage deel van de balk is waar de middelste helft van de berekeningen zit; hoe breder, hoe onzekerder.',
   ]);
@@ -2789,6 +2862,28 @@ function runTests() {
       ok(host.querySelector('.quiet-line'), 'één regel in plaats van een lege grafiek'); ok(!host.querySelector('.card').querySelector('.chart, .icon-btn'), 'geen assen, geen tabelknop');
       eq(host.querySelector('.hero .big').textContent, 'Droog'); eq(host.querySelector('.hero .sub').textContent, 'de komende 2 uur');
     } finally { state.forecast = saved.f; state.ens = saved.e; state.nowcast = saved.n; state.errors = saved.er; }
+  });
+  test('v22: Overzicht heeft de plaats als titel, het nu bovenaan en zon op/onder in de strook', () => {
+    const saved = { f: state.forecast, o: state.obs, e: state.ens, c: state.ecmwf, n: state.nowcast, t: state.tab };
+    try {
+      state.forecast = withDays(mkJson(), NOW, 52.37, 4.9); state.obs = null; state.ens = null; state.ecmwf = null; state.nowcast = null;
+      state.tab = 'overview'; render();
+      eq($('title').textContent, state.loc.name, 'plaats als titel'); ok($('locBtn').hidden, 'geen tweede plaatsknop');
+      ok($('title').querySelector('button'), 'titel is de locatieknop'); ok($('sunline').hidden, 'zonregel weg op Overzicht');
+      ok(!$('subtitle').textContent.includes(state.loc.name), 'plaats niet twee keer');
+      const now = $('content').querySelector('.now-card');
+      ok(now && now.querySelector('.now-temp'), 'kaart van nu'); ok(now.querySelector('.rain-row'), 'regenregel in de kaart van nu');
+      ok($('content').querySelector('.now-card + .card.hours .hour.now'), 'strip onder het nu, eerste cel Nu');
+      // the test data are of 31 oct 20:18: sunrise 1 nov 07:36 goes after the cell of 07, sunset 17:11 after 17
+      const strip = hourStrip(new Date(NOW));
+      const cells = [...strip.children], sun = cells.filter(x => x.classList.contains('sun'));
+      ok(sun.length >= 2, 'zon op en onder in de strook');
+      eq(cells[cells.indexOf(sun[0]) - 1].querySelector('.hl').textContent, '07', 'zon op na het uur van 07');
+      ok(sun[0].getAttribute('aria-label').startsWith('Zon op om 07:'), 'zon op'); eq(sun[0].querySelector('.ht').textContent, 'op');
+      ok(sun[1].getAttribute('aria-label').startsWith('Zon onder om 17:'), 'zon onder');
+      state.tab = 'temp'; render(); ok(!$('locBtn').hidden, 'plaatsknop terug'); eq($('title').textContent, 'Temperatuur'); ok($('sunline').hidden, 'geen zonregel op Temperatuur');
+      state.tab = 'hours'; render(); ok(!$('sunline').hidden, 'zonregel op Per uur');
+    } finally { state.forecast = saved.f; state.obs = saved.o; state.ens = saved.e; state.ecmwf = saved.c; state.nowcast = saved.n; state.tab = saved.t; render(); }
   });
   test('v21: bewolking noemt alleen lagen met wolken; fout in mensentaal, code onder Info', () => {
     eq(cloudHint({ cloud_cover: 0, cloud_cover_low: 0, cloud_cover_mid: 0, cloud_cover_high: 0 }), '0% bedekt');

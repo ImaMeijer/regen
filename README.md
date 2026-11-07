@@ -219,3 +219,14 @@ Uitgevoerd op de branch `ux/v20-snelle-winst`, om eerst lokaal te proberen. De a
 - **Bewolking:** de hint noemt alleen lagen met wolken ("0% bedekt" in plaats van vier keer 0%).
 - **Foutmelding in mensentaal:** zonder gegevens "De verwachting kon niet worden opgehaald. Controleer je verbinding en probeer het opnieuw." met een knop. Ook per kaart geen codes meer ("Radar is nu niet bereikbaar.", "Geen actuele radar."). De technische reden (HTTP 503 …) staat onder Info, in "Wat er niet lukte"; Info is daarvoor ook bereikbaar als er helemaal geen gegevens zijn.
 - Zelftests: 77 (nieuw: hoe lang droog, regenbalk en Regen-pagina in droge staat, bewolkingshint, foutmelding en Info).
+
+## Versie 22: het nu bovenaan, de plaats als titel (UX-audit stap 2, "v21" in het stappenplan, richting A)
+
+Op dezelfde branch als versie 21 (`ux/v20-snelle-winst`). Keuzes van Ima: richting A; "bijgewerkt" onder de titel; de plaats als titel alleen op Overzicht; dagrijen van 44 px zodat alles op één scherm past.
+
+- **Kop van Overzicht (B2):** de titel is de plaats ("Amsterdam ›"), en de titel zelf is de locatieknop; de blauwe plaatsknop erboven valt op Overzicht weg. Eronder "Noord-Holland · bijgewerkt 22:30" (of de verouderd-tekst). De andere pagina's houden hun eigen titel met de plaatsknop en de plaats in de regel eronder. Het tabblad van de browser heet op Overzicht "Weer · Amsterdam".
+- **Zonregel:** op Overzicht vervangen door vakjes in de uurstrook; de volledige regel met schemer staat alleen nog op Per uur en de dagpagina's, niet meer op Temperatuur, Wind, Bewolking, Regen en Info.
+- **Kaart van nu (B1):** temperatuur groot (48 px, licht gewicht), het icoontje en het weerbeeld van nu ernaast, daaronder op één regel "voelt als 3° · vandaag 2° tot 7° · gemeten 22:20" (het station staat in de tooltip en op Temperatuur en Wind). Vandaag is hetzelfde bereik als de rij "Vandaag" in de lijst. De regenregel is de onderste regel van deze kaart en opent Regen, zoals voorheen. Per uur houdt zijn eigen tegel.
+- **Uurstrook:** "Nu" vetgedrukt; zon op en zon onder als eigen vakje na het uur waarin ze vallen (tijd, zon op de horizon met pijl, "op"/"onder"), zoals Apple Weer.
+- **Eén scherm:** dagrijen 44 px (was 48), 12 px tussen de kaarten op Overzicht (was 14), de kop "Komende dagen" klein en in hoofdletters zoals in Apple Weer. Nagemeten op 393 × 852 met de marges van statusbalk (59 px) en thuisbalk (34 px): Overzicht scrollt niet.
+- Zelftests: 78 (nieuw: kop, kaart van nu, zoncellen, zonregel per pagina). `hourStrip` krijgt het tijdstip van nu als parameter, zodat de test met vaste data de zoncellen kan controleren.
