@@ -126,8 +126,8 @@ a { color: var(--label-2); }
 :focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
 /* small controls keep their look but get a 44 px tap target: an invisible ::before around them, so the layout
    (and one screen per tab) stays as it is */
-.loc-pill, .info-btn, .icon-btn, .back-link, .text-btn, .segmented button { position: relative; }
-.loc-pill::before, .info-btn::before, .icon-btn::before, .back-link::before, .text-btn::before, .segmented button::before {
+.loc-pill, .info-btn, .icon-btn, .text-btn, .segmented button { position: relative; }
+.loc-pill::before, .info-btn::before, .icon-btn::before, .text-btn::before, .segmented button::before {
   content: ""; position: absolute; left: 50%; top: 50%;
   width: max(100%, var(--hit)); height: max(100%, var(--hit)); transform: translate(-50%, -50%);
 }
@@ -337,12 +337,6 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .rain-row .spark .base { stroke: var(--s1); stroke-opacity: 0.35; stroke-width: 1; }
 .rain-row .spark rect { fill: var(--s1); }
 .rain-row .chev { width: 16px; height: 16px; color: var(--label-3); flex: none; }
-.back-link {
-  display: inline-flex; align-items: center; gap: 2px; margin: 10px 0 -4px -6px; padding: 4px 8px 4px 2px;
-  font-size: 15px; font-weight: 500; color: var(--tint); border-radius: 999px;
-}
-.back-link .ico { width: 18px; height: 18px; }
-.back-link:active { background: var(--tint-wash); }
 .hour-strip { display: flex; overflow-x: auto; padding: 8px 6px 0; cursor: pointer; scrollbar-width: none; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }
 .hour-strip::-webkit-scrollbar { display: none; }
 .hour { flex: 0 0 46px; display: flex; flex-direction: column; align-items: center; gap: 3px; font-variant-numeric: tabular-nums; }
@@ -351,7 +345,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .hour .ht { font-size: 15px; font-weight: 500; }
 .week-list { list-style: none; margin: 0; padding: 0; }
 .week-row {
-  display: grid; grid-template-columns: 4.6em 46px 2.2em 1fr 2.2em; align-items: center; gap: 8px;
+  display: grid; grid-template-columns: 4.6em 46px 2.2em 1fr 2.2em 10px; align-items: center; gap: 8px;
   min-height: 44px; padding: 2px 0; border-top: 1px solid var(--separator); /* Apple's row height: seven days and the card of now fit one screen */
   font-size: 17px; font-variant-numeric: tabular-nums;
 }
@@ -530,3 +524,32 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .top.place { padding-bottom: 2px; }
 .week-card .card-head { margin-bottom: 2px; }
 .week-card .card-head h2 { font-size: 13px; font-weight: 600; color: var(--label-2); text-transform: uppercase; letter-spacing: 0.02em; }
+
+/* ---------- v23: back in the header, what can be tapped, pull to refresh (UX-audit B4, B10) ---------- */
+.back-btn { gap: 0; padding-left: 4px; }
+.back-btn .ico { width: 20px; height: 20px; }
+/* a day with a page of its own ends in a chevron, as a list row does on the iPhone */
+.week-row .go { width: 10px; height: 14px; color: var(--label-3); justify-self: end; }
+/* the hourly strip says it scrolls on and opens: it fades out at the right edge into a chevron */
+.card.hours { position: relative; }
+.strip-more {
+  position: absolute; top: 0; right: 0; bottom: 0; width: 34px; pointer-events: none;
+  display: flex; align-items: center; justify-content: flex-end; padding-right: 4px;
+  background: linear-gradient(90deg, transparent, var(--card) 70%); color: var(--label-3);
+  border-radius: 0 18px 18px 0;
+}
+.strip-more svg { width: 12px; height: 16px; }
+/* pull to refresh: an arrow that turns over at the threshold, then spins while loading */
+.ptr {
+  position: absolute; left: 50%; top: calc(6px + env(safe-area-inset-top)); z-index: 5;
+  width: 32px; height: 32px; margin-left: -16px; border-radius: 999px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--card); color: var(--label-2); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  opacity: 0; transform: translateY(-40px); pointer-events: none;
+}
+.ptr svg { width: 18px; height: 18px; transition: transform 150ms; }
+.ptr.armed svg { transform: rotate(180deg); }
+.ptr.busy svg { animation: ptr-spin 0.8s linear infinite; }
+@keyframes ptr-spin { to { transform: rotate(360deg); } }
+.ptr.settle { transition: transform 220ms cubic-bezier(.2,.8,.2,1), opacity 220ms; }
+@media (prefers-reduced-motion: reduce) { .ptr.busy svg { animation-duration: 2.4s; } }

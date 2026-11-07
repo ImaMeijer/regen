@@ -1,7 +1,7 @@
 /* Service worker: app-schil offline beschikbaar. Data (Open-Meteo, Buienradar) gaat er bewust buiten om:
    de app bewaart zelf de laatste versie mét ophaaltijd en meldt het als die verouderd is.
    Bump CACHE bij elke release zodat oude schillen worden opgeruimd. */
-const CACHE = 'regen-v22';
+const CACHE = 'regen-v23';
 const SHELL = ['./', './index.html', './app.css', './app.js', './manifest.json', './icon.svg'];
 
 self.addEventListener('install', e => {

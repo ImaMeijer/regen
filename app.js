@@ -1271,7 +1271,10 @@ function render() {
   // to change it, the province and "bijgewerkt" sit below. The other pages keep their own title.
   const placeTitle = state.tab === 'overview';
   $('top').classList.toggle('place', placeTitle);
-  $('locBtn').hidden = placeTitle;
+  const sub = SUBPAGES.has(state.tab);
+  $('locBtn').hidden = placeTitle || sub;
+  $('backBtn').hidden = !sub;
+  if (sub) { $('backLabel').textContent = backTarget(); $('backBtn').setAttribute('aria-label', `Terug naar ${backTarget()}`); }
   if (placeTitle) {
     const t = $('title'); t.textContent = '';
     const btn = h('button', 'title-btn'); btn.type = 'button'; btn.setAttribute('aria-label', `${state.loc.name}, locatie wijzigen`);
@@ -1600,6 +1603,8 @@ function topCard(c) {
   if (!strip) return;
   const k = h('section', 'card hours');
   k.appendChild(strip);
+  // it scrolls on and opens Per uur: fade into a chevron at the right edge
+  k.insertAdjacentHTML('beforeend', '<span class="strip-more" aria-hidden="true"><svg viewBox="0 0 12 16"><path d="M3.5 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>');
   c.appendChild(k);
 }
 /* The weather of now at the top of Overzicht (UX-audit B1, direction A): the temperature large, what the sky
@@ -1720,18 +1725,18 @@ function sunCell(ev) {
   cell.appendChild(h('span', 'ht', up ? 'op' : 'onder'));
   return cell;
 }
-/* "‹ Overzicht" above a page that is reached from Overzicht instead of from the tab bar. */
-function backLink(c) {
-  const back = h('button', 'back-link');
-  back.type = 'button';
-  back.innerHTML = '<svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M12.5 4.5L7 10l5.5 5.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Overzicht';
-  back.addEventListener('click', () => { if (!goBack()) { state.tab = 'overview'; toTop(); render(); } });
-  c.appendChild(back);
+/* Pages that are not a tab: they open on top of another page and get "‹ <that page>" in the header, where the
+   place button sits on a tab (UX-audit B4). */
+const SUBPAGES = new Set(['hours', 'rain', 'day', 'info']);
+function backTarget() {
+  const top = nav.stack[nav.stack.length - 1];
+  return top ? top.title : TABS.overview;
 }
+function goBackOrHome() { if (!goBack()) { state.tab = 'overview'; toTop(); render(); } }
 /* The hourly page (the former Overzicht), reached from the strip. */
-function renderHours(c) { backLink(c); renderOverview(c); }
+function renderHours(c) { renderOverview(c); }
 /* Regen has no tab of its own any more: it opens from the rain bar on Overzicht. */
-function renderRainPage(c) { backLink(c); renderRain(c); }
+function renderRainPage(c) { renderRain(c); }
 /* The ECMWF hours of a day, 00:00 up to and including the next midnight (so the lines run to the edge). */
 function ensDayHours(day) {
   const hrs = (state.ecmwf && state.ecmwf.hours) || [];
@@ -1744,7 +1749,6 @@ const hasDayPage = d => d.src === 'harmonie' || ensDayHours(d.day).length >= 24;
 function renderDayPage(c) {
   const d = state.day && weekDays().find(x => sameDay(x.day, state.day) && hasDayPage(x));
   if (!d) { state.tab = 'overview'; resetNav(); render(); return; }
-  backLink(c);
   if (d.src === 'harmonie') renderOverview(c, d); else renderEnsDay(c, d);
 }
 /* Per uur for an ECMWF day, as the KNMI plume shows it: temperature as the median with a band holding 90 % of
@@ -1840,6 +1844,9 @@ function renderWeek(c) {
     if (today && tNow != null) { const dot = h('span', 'now'); dot.style.left = pos(tNow); bar.appendChild(dot); }
     row.appendChild(bar);
     row.appendChild(h('span', 'mx', `${fmtNum(d.mx, 0)}°`));
+    // a day with a page of its own ends in a chevron (UX-audit B4); the others keep the column empty
+    if (hasDayPage(d)) row.insertAdjacentHTML('beforeend', '<svg class="go" viewBox="0 0 10 14" aria-hidden="true"><path d="M2.5 2l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>');
+    else row.appendChild(h('span'));
     row.setAttribute('aria-label', `${name}: ${ICON_WORDS[d.kind]}, ${fmtNum(d.mn, 0)} tot ${fmtNum(d.mx, 0)} graden` +
       (rainNote ? (d.chance != null ? `, kans op regen ${rainNote}` : `, ${rainNote} regen`) : ''));
     if (hasDayPage(d)) { // every day with hours behind it opens its own Per uur
@@ -2272,7 +2279,7 @@ function renderInfo(c) {
     c.lastChild.querySelector('p').className = 'err';
   }
   sec('Wat je ziet', [
-    'De app toont de verwachting voor de gekozen plaats. <b>Overzicht</b> draagt de naam van de plaats (tik erop om een andere te kiezen) en begint met het weer van nu: de temperatuur, het weerbeeld, hoe koud het voelt en de laagste en hoogste temperatuur van vandaag. Daaronder de regenregel: hoe lang het droog blijft, of wanneer het gaat regenen; komt er regen aan, dan kleurt de regel blauw met een mini-radar per 5 minuten. Daaronder het weer per uur en de komende zeven dagen, met per dag het weerbeeld, de laagste en hoogste temperatuur en de kans op regen. Tik op de regenbalk voor <b>Regen</b> (de radar voor de komende 2 uur en de neerslag per uur met de kans op regen) en op de uurstrook voor <b>Per uur</b>, dat temperatuur en weerbeeld per uur naast elkaar zet. Tik op een dag in de lijst voor dezelfde pagina voor alleen die dag (vandaag de hele dag vanaf middernacht, met een stippellijn op nu; de uren daarvoor zijn wat het model verwachtte, geen metingen); voor de dagen na morgen komt die uit het ECMWF-ensemble: de lijn is de middelste van de 51 berekeningen en de band laat zien waar 90% van de berekeningen zit (de 5% hoogste en de 5% laagste vallen erbuiten, zoals de lichte band van de KNMI-pluim), voor temperatuur én regen; bij regen noemt de tooltip die band gewoon als "0,0 tot 0,4 mm", omdat de middelste waarde bij buien bijna altijd 0 is, en de boompjes tonen de wind van de middelste berekening; "‹ Overzicht" brengt je terug. <b>Temperatuur</b>, <b>Wind</b> en <b>Bewolking</b> tonen elk hun eigen verloop.',
+    'De app toont de verwachting voor de gekozen plaats. <b>Overzicht</b> draagt de naam van de plaats (tik erop om een andere te kiezen) en begint met het weer van nu: de temperatuur, het weerbeeld, hoe koud het voelt en de laagste en hoogste temperatuur van vandaag. Daaronder de regenregel: hoe lang het droog blijft, of wanneer het gaat regenen; komt er regen aan, dan kleurt de regel blauw met een mini-radar per 5 minuten. Daaronder het weer per uur en de komende zeven dagen, met per dag het weerbeeld, de laagste en hoogste temperatuur en de kans op regen. Tik op de regenbalk voor <b>Regen</b> (de radar voor de komende 2 uur en de neerslag per uur met de kans op regen) en op de uurstrook voor <b>Per uur</b>, dat temperatuur en weerbeeld per uur naast elkaar zet. Tik op een dag in de lijst voor dezelfde pagina voor alleen die dag (vandaag de hele dag vanaf middernacht, met een stippellijn op nu; de uren daarvoor zijn wat het model verwachtte, geen metingen); voor de dagen na morgen komt die uit het ECMWF-ensemble: de lijn is de middelste van de 51 berekeningen en de band laat zien waar 90% van de berekeningen zit (de 5% hoogste en de 5% laagste vallen erbuiten, zoals de lichte band van de KNMI-pluim), voor temperatuur én regen; bij regen noemt de tooltip die band gewoon als "0,0 tot 0,4 mm", omdat de middelste waarde bij buien bijna altijd 0 is, en de boompjes tonen de wind van de middelste berekening; "‹ Overzicht" linksboven brengt je terug. Een dag met een eigen pagina heeft een pijltje. Trek een pagina bovenaan omlaag om te verversen. <b>Temperatuur</b>, <b>Wind</b> en <b>Bewolking</b> tonen elk hun eigen verloop.',
     'Zoomen: spreid twee vingers op een grafiek om in te zoomen, knijp ze samen om weer verder vooruit te kijken (tot 48 uur). De grafiek begint altijd bij nu; de titel van de kaart toont hoeveel uur je ziet en de keuze wordt onthouden. Sleep met één vinger over een grafiek om de waarden van dat moment te zien; de stippellijn volgt je vinger.',
     'De achtergrond van elke grafiek volgt de zon: warm bij daglicht, grijzer naarmate er meer bewolking is, donker in de nacht, met schemer ertussen. De zonnetjes boven de grafiek staan op zonsopkomst en -ondergang en tonen het weerbeeld van dat moment.',
     'Het <b>weerbeeld</b> van een verwacht uur (zonnig, half bewolkt, dunne bewolking, bewolkt, regen) komt uit de bewolking van het model: minder dan 30% is zonnig, 30 tot 70% half bewolkt. Is de lucht (bijna) dicht, dan kijkt de app hoeveel zon er nog doorkomt, vergeleken met een heldere hemel: veel zon betekent losse wolken (half bewolkt), een flink deel betekent een sluier van dunne, hoge wolken (dunne bewolking: zon boven drie strepen) en weinig zon een dik wolkendek (bewolkt). Bij lage zon en \'s nachts beslissen de lagen: alleen hoge wolken is dunne bewolking. Vanaf 0,1 mm in het uur is het regen. Het weerbeeld van nu in de tegel komt uit de metingen.',
@@ -2426,7 +2433,7 @@ const nav = { stack: [] };
 function openPage(tab, day) {
   nav.stack.push({ tab: state.tab, day: state.day, scroll: $('screen').scrollTop, title: state.tab === 'overview' ? TABS.overview : $('title').textContent }); // Overzicht's title is the place: back says where in the app
   state.tab = tab; if (day !== undefined) state.day = day;
-  toTop(); render();
+  toTop(); render(); pageAnim('fwd');
   try { history.pushState({ regenDepth: nav.stack.length }, ''); } catch (e) {}
 }
 function popTo(depth) {
@@ -2434,8 +2441,19 @@ function popTo(depth) {
   while (nav.stack.length > Math.max(0, depth)) prev = nav.stack.pop();
   if (!prev) return false;
   state.tab = prev.tab; state.day = prev.day;
-  render(); scrollJump(prev.scroll);
+  render(); scrollJump(prev.scroll); pageAnim('back');
   return true;
+}
+/* Transitions (UX-audit B4, B10): a page that opens slides in from the right, going back it comes from the
+   left, a tab fades in. Short and small (36 px), header and content together; nothing under reduced motion,
+   and nothing after the edge swipe, which has already moved the page with the finger. */
+const MOTION = { page: 220, fast: 150, ease: 'cubic-bezier(.2,.8,.2,1)', quiet: false };
+function pageAnim(kind) {
+  if (MOTION.quiet) { MOTION.quiet = false; return; }
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const dx = kind === 'fwd' ? 36 : kind === 'back' ? -36 : 0;
+  const frames = dx ? [{ transform: `translateX(${dx}px)`, opacity: 0 }, { transform: 'none', opacity: 1 }] : [{ opacity: 0 }, { opacity: 1 }];
+  for (const el of [$('top'), $('content')]) if (el.animate) el.animate(frames, { duration: dx ? MOTION.page : MOTION.fast, easing: MOTION.ease });
 }
 /* our back (button, swipe): pop now, then let the browser follow; its popstate then finds nothing left to do */
 function goBack() {
@@ -2499,7 +2517,7 @@ function swipeFinish(back) {
   const s = $('screen');
   s.classList.remove('swiping', 'settling'); s.style.transform = '';
   const hint = swipeHint(); hint.hidden = true; hint.style.opacity = ''; hint.style.transform = '';
-  if (back) goBack();
+  if (back) { MOTION.quiet = true; goBack(); } // the page already slid away with the finger
 }
 /* far enough (40 % of the width) or a quick flick goes back; otherwise the page slides back into place */
 function swipeEnd(t, instant) {
@@ -2536,7 +2554,81 @@ if (ownSwipe) {
   phone.addEventListener('pointermove', e => { if (swipe.engaged) e.stopPropagation(); }, true);
 }
 
+/* ---- pull to refresh (UX-audit B10): at the top of a page, pull down. An arrow comes along and turns over at
+   PTR_PULL; let go there and the app reloads, the arrow spinning until load() is done. "bijgewerkt" in the
+   header then shows the new time. Not while the edge swipe or a pinch is going on; a chart the finger starts
+   on does not scrub along. ---- */
+const PTR_PULL = 60; // px of pull, after resistance (half the finger's travel)
+const ptr = { on: false, engaged: false, x0: 0, y0: 0, d: 0, busy: false, reload: () => load() };
+function ptrEl() {
+  let el = $('ptr');
+  if (!el) {
+    el = h('div', 'ptr'); el.id = 'ptr'; el.setAttribute('aria-hidden', 'true');
+    el.innerHTML = '<svg viewBox="0 0 20 20"><path d="M10 4v12M5 11l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    $('phone').appendChild(el);
+  }
+  return el;
+}
+function ptrStart(x, y) {
+  ptr.on = false;
+  if (ptr.busy || $('screen').scrollTop > 0 || !$('sheet').hidden || swipe.on) return false;
+  Object.assign(ptr, { on: true, engaged: false, x0: x, y0: y, d: 0 });
+  return true;
+}
+/* true when this move belongs to the pull (then the caller stops the page from scrolling) */
+function ptrMove(x, y) {
+  if (!ptr.on || swipe.engaged) return false;
+  const dx = x - ptr.x0, dy = y - ptr.y0;
+  if (!ptr.engaged) {
+    if (dy < -10 || Math.abs(dx) > 10 && Math.abs(dx) > dy) { ptr.on = false; return false; } // scrolling down or sideways
+    if (dy < 10) return false;
+    if ($('screen').scrollTop > 0) { ptr.on = false; return false; }
+    ptr.engaged = true;
+    hideTooltip();
+    for (const hh of document.querySelectorAll('.chart')) if (hh._scrubTo) hh._scrubTo(null);
+  }
+  ptr.d = Math.max(0, dy - 10) * 0.5;
+  const el = ptrEl();
+  el.classList.remove('settle');
+  el.style.opacity = String(Math.min(1, ptr.d / PTR_PULL));
+  el.style.transform = `translateY(${Math.min(ptr.d, PTR_PULL + 20) - 40}px)`;
+  el.classList.toggle('armed', ptr.d >= PTR_PULL);
+  return true;
+}
+function ptrHide() {
+  const el = ptrEl();
+  el.classList.add('settle'); el.classList.remove('armed', 'busy');
+  el.style.opacity = '0'; el.style.transform = '';
+}
+/* let go: past the threshold reload (resolves true when done), else slide the arrow away (false) */
+async function ptrEnd() {
+  if (!ptr.on) return false;
+  const was = ptr.engaged; ptr.on = false; ptr.engaged = false;
+  if (!was) return false;
+  if (ptr.d < PTR_PULL) { ptrHide(); return false; }
+  const el = ptrEl();
+  el.classList.add('settle', 'busy'); el.classList.remove('armed');
+  el.style.opacity = '1'; el.style.transform = `translateY(${PTR_PULL - 40}px)`;
+  ptr.busy = true;
+  try { await ptr.reload(); } finally { ptr.busy = false; ptrHide(); }
+  return true;
+}
+function ptrCancel() { if (ptr.engaged) ptrHide(); ptr.on = false; ptr.engaged = false; }
+{
+  const s = $('screen');
+  s.addEventListener('touchstart', e => { if (e.touches.length !== 1) { ptrCancel(); return; } ptrStart(e.touches[0].clientX, e.touches[0].clientY); }, { passive: true });
+  s.addEventListener('touchmove', e => {
+    if (!ptr.on) return;
+    if (e.touches.length !== 1) { ptrCancel(); return; }
+    if (ptrMove(e.touches[0].clientX, e.touches[0].clientY) && e.cancelable) e.preventDefault();
+  }, { passive: false });
+  s.addEventListener('touchend', () => { ptrEnd(); });
+  s.addEventListener('touchcancel', ptrCancel);
+  $('phone').addEventListener('pointermove', e => { if (ptr.engaged) e.stopPropagation(); }, true);
+}
+
 $('infoBtn').addEventListener('click', () => openPage('info'));
+$('backBtn').addEventListener('click', goBackOrHome);
 for (const btn of document.querySelectorAll('.tab')) {
   btn.addEventListener('click', () => {
     if (state.tab === btn.dataset.tab) { $('screen').scrollTo({ top: 0 }); return; }
@@ -2544,7 +2636,7 @@ for (const btn of document.querySelectorAll('.tab')) {
     state.tab = btn.dataset.tab;
     try { localStorage.setItem('regen.tab', state.tab); } catch (e) {}
     toTop();
-    render();
+    render(); pageAnim('fade');
   });
 }
 function openSheet() { $('sheet').hidden = false; $('sheetBackdrop').hidden = false; $('results').textContent = ''; $('q').value = ''; setTimeout(() => $('q').focus(), 50); }
@@ -2975,7 +3067,7 @@ function runTests() {
       host.querySelector('.hour-strip').click();
       eq(state.tab, 'hours'); eq($('title').textContent, 'Per uur');
       eq(document.querySelector('.tab[data-tab="overview"]').getAttribute('aria-pressed'), 'true', 'tab Overzicht gemarkeerd');
-      const back = $('content').querySelector('.back-link'); ok(back, 'terugknop');
+      const back = $('backBtn'); ok(!back.hidden, 'terugknop in de kop');
       back.click(); eq(state.tab, 'overview'); ok($('content').querySelector('.week-list'), 'terug bij de dagen');
     } finally { state.forecast = saved.f; state.obs = saved.o; state.ens = saved.e; state.ecmwf = saved.c; state.tab = saved.t; render(); }
   });
@@ -2994,7 +3086,7 @@ function runTests() {
       host.querySelector('.rain-row').click();
       eq(state.tab, 'rain'); eq($('title').textContent, 'Regen');
       eq(document.querySelector('.tab[aria-pressed="true"]').dataset.tab, 'overview', 'tab Overzicht gemarkeerd');
-      ok($('content').querySelector('.back-link'), 'terugknop'); ok(!document.querySelector('.tab[data-tab="rain"]'), 'geen Regen-tab meer');
+      ok(!$('backBtn').hidden, 'terugknop in de kop'); ok(!document.querySelector('.tab[data-tab="rain"]'), 'geen Regen-tab meer');
     } finally { state.forecast = saved.f; state.obs = saved.o; state.ens = saved.e; state.ecmwf = saved.c; state.nowcast = saved.n; state.tab = saved.t; render(); }
   });
   test('v21: droog zegt hoe lang, zonder lege mini-radar; Regen-pagina zonder lege grafiek', () => {
@@ -3065,7 +3157,7 @@ function runTests() {
       eq(page.querySelector('.hero .l').textContent, 'Zondag 1 november'); ok(page.querySelector('.hero .big').textContent.includes('10° tot 10°'), 'min en max van de dag');
       eq(page.querySelector('.card h2').textContent, 'Per uur'); ok(page.querySelector('.chart') && !page.querySelector('.chart.zoomable'), 'grafiek zonder zoom');
       eq(document.querySelector('.tab[aria-pressed="true"]').dataset.tab, 'overview');
-      page.querySelector('.back-link').click(); eq(state.tab, 'overview');
+      $('backBtn').click(); eq(state.tab, 'overview');
     } finally { state.forecast = saved.f; state.obs = saved.o; state.ens = saved.e; state.ecmwf = saved.c; state.tab = saved.t; state.day = saved.d; render(); }
   });
   test('dagpagina vandaag toont de hele dag vanaf middernacht, met de streep van nu', () => {
@@ -3404,7 +3496,7 @@ function runTests() {
       eq(state.tab, 'day'); eq(nav.stack.length, 1); eq(s.scrollTop, 0, 'dag begint bovenaan');
       $('infoBtn').click(); eq(state.tab, 'info'); eq(nav.stack.length, 2, 'Info bovenop de dag');
       ok(goBack(), 'terug kan'); eq(state.tab, 'day', 'van Info terug naar de dag');
-      $('content').querySelector('.back-link').click(); eq(state.tab, 'overview'); eq(nav.stack.length, 0);
+      $('backBtn').click(); eq(state.tab, 'overview'); eq(nav.stack.length, 0);
       eq(s.scrollTop, at, 'terug op de plek waar je was');
       ok(!goBack(), 'op een tab is er geen terug');
       $('content').querySelector('.rain-row').click(); eq(state.tab, 'rain'); eq(nav.stack.length, 1);
@@ -3433,6 +3525,40 @@ function runTests() {
       ok(start()); swipeMove(x + 200, y); ok(swipeEnd(2000, true), 'halverwege losgelaten gaat terug'); eq(state.tab, 'overview');
       ok(!$('screen').classList.contains('swiping') && $('swipeBack').hidden, 'opgeruimd');
     } finally { state.forecast = saved.f; state.obs = saved.o; state.ens = saved.e; state.ecmwf = saved.c; state.tab = saved.t; state.day = saved.d; nav.stack = saved.n; render(); }
+  });
+
+  test('v23: terugknop in de kop zegt waarheen; dagen met een pagina hebben een pijltje; de strook een hint', () => {
+    const saved = { f: state.forecast, o: state.obs, e: state.ens, c: state.ecmwf, t: state.tab, d: state.day, n: nav.stack };
+    try {
+      state.forecast = withDays(mkJson(), NOW, 52.37, 4.9); state.obs = null; state.ens = null;
+      state.ecmwf = { days: [{ day: new Date(2026, 10, 2), kind: 'cloud', mn: 3, mx: 8, mnLo: 2, mxHi: 10, chance: 0.6, n: 51 }] };
+      nav.stack = []; state.tab = 'overview'; render();
+      ok($('backBtn').hidden, 'op een tab geen terug'); ok(!$('content').querySelector('.back-link'), 'geen losse terugregel meer');
+      const rows = $('content').querySelectorAll('.week-row');
+      ok(rows[0].querySelector('.go') && rows[1].querySelector('.go'), 'pijltje op dagen met een pagina'); ok(!rows[2].querySelector('.go'), 'geen pijltje zonder pagina');
+      eq(rows[0].children.length, rows[2].children.length, 'kolommen blijven gelijk');
+      ok($('content').querySelector('.card.hours .strip-more'), 'hint aan de rand van de strook');
+      rows[1].click(); eq(state.tab, 'day');
+      ok(!$('backBtn').hidden && $('locBtn').hidden, 'terug op de plek van de plaatsknop'); eq($('backLabel').textContent, 'Overzicht');
+      $('infoBtn').click(); eq(state.tab, 'info'); eq($('backLabel').textContent, 'Zondag', 'Info gaat terug naar de dag');
+      $('backBtn').click(); eq(state.tab, 'day'); $('backBtn').click(); eq(state.tab, 'overview'); ok($('backBtn').hidden);
+    } finally { state.forecast = saved.f; state.obs = saved.o; state.ens = saved.e; state.ecmwf = saved.c; state.tab = saved.t; state.day = saved.d; nav.stack = saved.n; render(); }
+  });
+  test('v23: trekken om te verversen: alleen bovenaan, pas voorbij de drempel, niet bij zijwaarts of omhoog', () => {
+    const savedReload = ptr.reload, s = $('screen');
+    let calls = 0; ptr.reload = () => { calls++; return Promise.resolve(); };
+    try {
+      toTop();
+      ok(ptrStart(100, 200)); ok(!ptrMove(100, 205), 'te klein'); ok(ptrMove(100, 260), 'omlaag trekken'); ok(ptr.d < PTR_PULL);
+      ptrEnd(); eq(calls, 0, 'onder de drempel: niet verversen'); ok(!ptr.on);
+      ok(ptrStart(100, 200)); ok(ptrMove(100, 340)); ok(ptr.d >= PTR_PULL); ok($('ptr').classList.contains('armed'), 'pijl omgeslagen');
+      ptrEnd(); eq(calls, 1, 'voorbij de drempel: verversen'); ok($('ptr').classList.contains('busy'), 'draait tijdens het laden');
+      ptr.busy = false;
+      ok(ptrStart(100, 200)); ok(!ptrMove(140, 205), 'zijwaarts is geen trek'); ok(!ptr.on);
+      ok(ptrStart(100, 200)); ok(!ptrMove(100, 180), 'omhoog = scrollen'); ok(!ptr.on);
+      const spacer = h('div'); spacer.style.height = '3000px'; s.appendChild(spacer);
+      try { scrollJump(200); ok(!ptrStart(100, 200), 'niet als de pagina naar beneden gescrold is'); } finally { spacer.remove(); toTop(); }
+    } finally { ptr.reload = savedReload; ptr.busy = false; ptr.on = false; ptr.engaged = false; ptrHide(); }
   });
 
   nav.stack = []; // tests that open a page and do not come back leave it behind; the app is back on a tab
