@@ -898,13 +898,12 @@ const b = txt => { const n = h('b', null, txt); return n; };
 const DEFAULT_LOC = { name: 'Amsterdam', admin: 'Noord-Holland', lat: 52.37, lon: 4.90 };
 const HORIZON_MIN = 6; // uren
 /* horizon: hoeveel uur vooruit de 2,5-daagse grafieken tonen, altijd vanaf nu; null = alles tot de modelhorizon */
-const state = { loc: DEFAULT_LOC, tab: 'overview', nowcast: null, forecast: null, updated: null, rainModel: 'harmonie', errors: {}, horizon: null, fetched: {}, proef: true };
+const state = { loc: DEFAULT_LOC, tab: 'overview', nowcast: null, forecast: null, updated: null, rainModel: 'harmonie', errors: {}, horizon: null, fetched: {} };
 try {
   const l = JSON.parse(localStorage.getItem('regen.loc') || 'null');
   if (l && Number.isFinite(l.lat) && Number.isFinite(l.lon)) state.loc = l;
   const t = localStorage.getItem('regen.tab'); if (t && ['overview', 'temp', 'wind', 'cloud'].includes(t)) state.tab = t;
   const hz = parseFloat(localStorage.getItem('regen.horizon')); if (Number.isFinite(hz) && hz >= HORIZON_MIN) state.horizon = hz;
-  if (localStorage.getItem('regen.proef') === '0') state.proef = false; // the trial of UX-audit step 5, switched off under Info
 } catch (e) {}
 
 const nowcastUrl = (lat, lon) => `https://gpsgadget.buienradar.nl/data/raintext?lat=${lat.toFixed(2)}&lon=${lon.toFixed(2)}`;
@@ -1012,9 +1011,9 @@ function memberDay(m, ia, n, times, lat, lon) {
   }
   return { kind: medianKind(ranks), mn: Math.min(...temps), mx: Math.max(...temps), rain };
 }
-/* ECMWF JSON → { days: [{ day, kind, mn, mx, mnLo, mxHi, chance, n }] }: per member its own day, then over the
-   members the median icon, the median of the daily min and max (as the KNMI plume), their 25/75 % (the plume's
-   50 % band) and the share of wet members. */
+/* ECMWF JSON → { days: [{ day, kind, mn, mx, mnLo, mxHi, mxLo, chance, n }] }: per member its own day, then over the
+   members the median icon, the median of the daily min and max (as the KNMI plume), their 10/90 % (ENS_BAND: the
+   faint part of the bar runs from the low min to the high max; mxLo/mxHi say how sure the day is) and the share of wet members. */
 function parseEcmwf(json, lat, lon, now = new Date()) {
   const hh = json && json.hourly;
   if (!hh || !Array.isArray(hh.time)) throw new Error('Onverwacht antwoord van de ensemble-API');
@@ -1026,10 +1025,11 @@ function parseEcmwf(json, lat, lon, now = new Date()) {
   return { days: ecmwfDays(members, times, lat, lon, now), hours: ecmwfHours(members, times, lat, lon), members: members.length };
 }
 /* Per hour over the members, for the day pages of the ECMWF days (as the KNMI plume): temperature as median
-   with a band holding 90 % of the members (ENS_BAND), rain in the hour (t, tEnd] the same way plus the share
+   with the band holding 8 of the 10 members (ENS_BAND), rain in the hour (t, tEnd] the same way plus the share
    with ≥ 0,1 mm, the icon as the median of the members' icons, the sky cover as their median, and the wind of
    the middle run: the member whose wind speed is the median of the hour, so speed and direction belong together. */
-const ENS_BAND = [0.05, 0.95]; // 90 % of the members, as the KNMI plume's light band
+const ENS_BAND = [0.1, 0.9]; // 8 of the 10 members: the one band of the app (UX-audit C4), as in the charts and the week list
+const BAND_NAME = '8 van de 10 berekeningen'; // its name in every legend
 function ecmwfHours(members, times, lat, lon) {
   const out = [], need = Math.max(3, members.length / 2);
   for (let i = 0; i + 1 < times.length; i++) {
@@ -1059,7 +1059,7 @@ function ecmwfDays(members, times, lat, lon, now) {
     if (md.length < Math.max(3, members.length / 2)) break;
     const mins = md.map(d => d.mn).sort((x, y) => x - y), maxs = md.map(d => d.mx).sort((x, y) => x - y);
     days.push({ day: a, kind: medianKind(md.map(d => KIND_RANK.indexOf(d.kind))),
-      mn: quantile(mins, 0.5), mx: quantile(maxs, 0.5), mnLo: quantile(mins, 0.25), mxHi: quantile(maxs, 0.75),
+      mn: quantile(mins, 0.5), mx: quantile(maxs, 0.5), mnLo: quantile(mins, ENS_BAND[0]), mxHi: quantile(maxs, ENS_BAND[1]), mxLo: quantile(maxs, ENS_BAND[0]),
       chance: md.filter(d => d.rain >= DAY_RAIN_MM).length / md.length, n: md.length });
   }
   return days;
@@ -1297,9 +1297,8 @@ function render() {
   const c = $('content');
   c.classList.toggle('ov', placeTitle);
   const screen = $('screen');
-  // trial (UX-audit step 5): neutral controls everywhere (CSS on :root.proef), the sky of now behind Overzicht
-  document.documentElement.classList.toggle('proef', !!state.proef);
-  const sky = placeTitle && state.proef;
+  // UX-audit C2: the sky of now behind the header of Overzicht
+  const sky = placeTitle;
   screen.classList.toggle('sky', sky);
   if (sky) screen.style.setProperty('--sky-now', skyNow()); else screen.style.removeProperty('--sky-now');
   const keepScroll = screen.scrollTop; // rebuilding the content must not move the page
@@ -1580,7 +1579,7 @@ function ensBand(v, color = 'var(--s1)') {
   if (!e || !e.bands[v] || !e.bands[v].length) return [];
   return [{ kind: 'band', name: 'ensemble', color, points: e.bands[v].map(r => ({ t: r.t, lo: r.lo, hi: r.hi })) }];
 }
-function ensLegend(color = 'var(--s1)') { return state.ens ? [{ name: 'Onzekerheid (10–90%)', color, band: true }] : []; }
+function ensLegend(color = 'var(--s1)') { return state.ens ? [{ name: BAND_NAME, color, band: true }] : []; }
 function ensFoot(H) { return state.ens ? ` · band t/m ${fmtDayTime(state.ens.horizon)}` : ''; }
 
 /* ---------------- Week ---------------- */
@@ -1613,7 +1612,7 @@ function topCard(c) {
   k.insertAdjacentHTML('beforeend', '<span class="strip-more" aria-hidden="true"><svg viewBox="0 0 12 16"><path d="M3.5 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>');
   c.appendChild(k);
 }
-/* ---- trial (UX-audit step 5): the weather in words, the sky of now behind the header ---- */
+/* ---- UX-audit step 5: the weather in words, the sky of now behind the header ---- */
 const cap = s => s[0].toUpperCase() + s.slice(1);
 /* A moment in words: vannacht, vanochtend, vanmiddag, vanavond; morgenochtend …; zaterdagmiddag; in de nacht
    naar zaterdag. Night is 0–6 h, morning 6–12, afternoon 12–18, evening 18–24. */
@@ -1659,12 +1658,6 @@ function skyNow(now = new Date()) {
   if (f != null) c = mix(c, pal.cloud, clamp((alt + 6) / 14, 0, 1) * 0.7 * f);
   return `rgb(${c[0]},${c[1]},${c[2]})`;
 }
-/* The trial switch under Info: on by default, remembered on the phone. */
-function setProef(on) {
-  state.proef = on;
-  try { localStorage.setItem('regen.proef', on ? '1' : '0'); } catch (e) {}
-  render();
-}
 /* The weather of now at the top of Overzicht (UX-audit B1, direction A): the temperature large, what the sky
    does, feels-like and today's range (the same as the row "Vandaag" below), with the rain bar as its last line.
    The tile on Per uur stays as it is. Without a forecast only the rain bar. */
@@ -1693,29 +1686,27 @@ function nowCard(c) {
     // one line, so the week still fits: the station is on Temperatuur and Wind, here only measured or forecast
     parts.push(o && o.temp != null ? `gemeten ${fmtTime(o.time)}` : 'verwacht');
     const source = o && o.temp != null ? `Gemeten ${fmtTime(o.time)} bij ${o.station} (${fmtNum(o.dist, 0)} km)` : 'Verwacht, geen meting';
-    if (state.proef) {
-      // trial (UX-audit C1): the weather in one or two sentences instead of the feels-like line, which is on
-      // Temperatuur and in the row Vandaag as well; where the temperature comes from stays in the tooltip
-      const say = h('p', 'now-say', weatherLine(now));
-      say.title = `${source} · ${parts.join(' · ')}`;
-      top.appendChild(say);
-      // trial (UX-audit C3): a small tree with the wind of now; a tap opens Wind
-      const kmh = o && o.wind != null ? o.wind : r0 ? r0.wind_speed_10m : null;
-      const dir = o && o.wind != null ? o.dir : r0 ? r0.wind_direction_10m : null;
-      if (kmh != null) {
-        const b = beaufort(kmh);
-        const btn = h('button', 'now-tree'); btn.type = 'button';
-        btn.setAttribute('aria-label', `Wind ${fmtNum(kmh, 0)} km/u, ${b} Bft${dir != null ? ` uit ${compass(dir)}` : ''}. Open Wind`);
-        const svg = svgEl('svg', { viewBox: '8 4 84 100', 'aria-hidden': 'true' });
-        const g = makeTree(1); svg.appendChild(g); btn.appendChild(svg);
-        windTree(g, kmh, dir, null);
-        btn.addEventListener('click', () => document.querySelector('.tab[data-tab="wind"]').click());
-        top.appendChild(btn); top.classList.add('with-tree');
-      }
-    } else {
-      const feelEl = h('div', 'now-feel', parts.join(' · '));
-      feelEl.title = source;
-      top.appendChild(feelEl);
+    // UX-audit C1: the weather in one or two sentences instead of a feels-like line, which is on Temperatuur and
+    // in the row Vandaag as well; where the temperature comes from stays in the tooltip
+    const say = h('p', 'now-say', weatherLine(now));
+    say.title = `${source} · ${parts.join(' · ')}`;
+    top.appendChild(say);
+    // UX-audit C3: a small tree in its wind field, with the wind of now, as on Wind; a tap opens Wind
+    const kmh = o && o.wind != null ? o.wind : r0 ? r0.wind_speed_10m : null;
+    const dir = o && o.wind != null ? o.dir : r0 ? r0.wind_direction_10m : null;
+    if (kmh != null) {
+      const b = beaufort(kmh);
+      const btn = h('button', 'now-tree'); btn.type = 'button';
+      btn.setAttribute('aria-label', `Wind ${fmtNum(kmh, 0)} km/u, ${b} Bft${dir != null ? ` uit ${compass(dir)}` : ''}. Open Wind`);
+      const svg = svgEl('svg', { viewBox: '0 0 100 110', 'aria-hidden': 'true' });
+      const field = makeWindField(), g = makeTree(1);
+      svg.appendChild(field); svg.appendChild(g); btn.appendChild(svg);
+      setWindField(field, kmh, dir);
+      // at a third of the size on Wind the streaks need more ink to be seen: twice as opaque (CSS: thicker too)
+      field.style.setProperty('--wop', String(Math.min(0.9, (parseFloat(field.style.getPropertyValue('--wop')) || 0) * 2)));
+      windTree(g, kmh, dir, null);
+      btn.addEventListener('click', () => document.querySelector('.tab[data-tab="wind"]').click());
+      top.appendChild(btn); top.classList.add('with-tree');
     }
     k.appendChild(top);
   }
@@ -1850,7 +1841,7 @@ function renderEnsDay(c, d) {
   drawChart(k.body, { sky, group: 'overview', tMin: a, tMax: b, noZoom: true, unit: '°C', unitTip: '°C', ticks: 'days', now: new Date(),
     yOpts: { minSpan: 8, targetTicks: 4 }, icons, trees, height: 240,
     series: [
-      { kind: 'band', name: '90% van de berekeningen', color: 'var(--s2)', points: hrs.map(p => ({ t: p.t, lo: p.tLo, hi: p.tHi })) },
+      { kind: 'band', name: BAND_NAME, color: 'var(--s2)', points: hrs.map(p => ({ t: p.t, lo: p.tLo, hi: p.tHi })) },
       { kind: 'line', name: 'Temperatuur', color: 'var(--s2)', colorAt: tempColor, points: hrs.map(p => ({ t: p.t, v: p.tMed, row: p })), smooth: 'soft' },
     ],
     fmt: v => fmtNum(v, 0), directLabels: 'minmax', tipTime: p => fmtDayTime(p.t),
@@ -1864,7 +1855,7 @@ function renderEnsDay(c, d) {
     // as the plume: the middle of the members as a line, at the middle of its hour, inside the band of 90 % of them;
     // the tooltip gives the band as a plain range ("0,0 tot 0,4 mm"), since the median alone is mostly 0
     series: [
-      { kind: 'band', name: '90% van de berekeningen', color: 'var(--s1)', points: blocks.map(p => ({ t: mid(p), lo: p.pLo, hi: p.pHi })) },
+      { kind: 'band', name: BAND_NAME, color: 'var(--s1)', points: blocks.map(p => ({ t: mid(p), lo: p.pLo, hi: p.pHi })) },
       { kind: 'line', name: 'Neerslag', color: 'var(--s1)', points: blocks.map(p => ({ t: mid(p), v: p.pMed, row: p })) },
     ],
     fmt: fmtMm, tipTime: p => `${fmtWd(p.row.t)} ${fmtHourRange(p.row.t)}`,
@@ -2083,12 +2074,44 @@ function nowKind(now) {
   if (o.sky != null) return sunWeatherKind({ cloud: o.sky, rain: null });
   return dk || (w ? w.kind : 'clear');
 }
+/* How sure a day is, in one word (UX-audit C4), from the band (8 of the 10 members) around its highest
+   temperature: narrower than 2° zeker, 2 to 4° vrij zeker, 4° or more onzeker. ECMWF days from the members'
+   daily maxima; today and tomorrow from the ICON-D2 ensemble at the warmest hour of the whole day in ICON-D2.
+   Once that hour has passed (this evening) the ensemble has no band for it any more: no word, since the
+   warmest part of today is over. null without an ensemble too. */
+const SURE = [[2, 'zeker'], [4, 'vrij zeker'], [Infinity, 'onzeker']];
+function certainty(d) {
+  let lo = d.mxLo, hi = d.mxHi;
+  if (lo == null || hi == null) {
+    const e = state.ens, T0 = tempModel();
+    if (!e || !e.bands.temperature_2m || !T0 || T0.key !== TEMP_MODEL.key) return null;
+    const end = new Date(d.day); end.setDate(end.getDate() + 1);
+    let top = null;
+    for (const r of withPast(T0, T0.key).instant) {
+      if (r.t < d.day || r.t >= end || r.temperature_2m == null) continue;
+      if (!top || r.temperature_2m > top.temperature_2m) top = r;
+    }
+    const b = top && e.bands.temperature_2m.find(q => Math.abs(q.t.getTime() - top.t.getTime()) < HOUR / 2);
+    if (!b || b.lo == null || b.hi == null) return null;
+    ({ lo, hi } = b);
+  }
+  return { word: SURE.find(([lim]) => hi - lo < lim)[1], lo, hi };
+}
+/* the hint of a day tile with the certainty word after it, and its numbers in the tooltip */
+function withCertainty(hero, d) {
+  const s = certainty(d), hint = hero.querySelector('.h');
+  if (!s || !hint) return;
+  hint.textContent += ` · ${s.word}`;
+  // one decimal: rounded to whole degrees a band of 1,9° could read as 3° wide and contradict "zeker"
+  hint.title = `${BAND_NAME}: hoogste temperatuur ${fmtNum(s.lo, 1)}° tot ${fmtNum(s.hi, 1)}°`;
+}
 /* Tile of a day page for a day other than today: the day's icon, min to max and the chance of rain. */
 function dayHero(c, d) {
   const long = d.day.toLocaleDateString(nl, { weekday: 'long', day: 'numeric', month: 'long' });
   const rain = d.chance != null ? (d.chance >= 0.1 ? `kans op regen overdag ${fmtProb(d.chance)}` : 'overdag droog')
     : d.rain >= 0.1 ? `overdag ${fmtMm(d.rain)} mm` : 'overdag droog';
   heroBlock(c, '', long[0].toUpperCase() + long.slice(1), `${fmtNum(d.mn, 0)}° tot ${fmtNum(d.mx, 0)}° · ${ICON_WORDS[d.kind]}`, rain);
+  withCertainty(c.lastElementChild, d);
   const icon = svgEl('svg', { class: 'ico-big wicon-big', viewBox: '-10 -10 20 20', 'aria-hidden': 'true' });
   icon.appendChild(weatherIcon(0, 0, d.kind, false));
   c.lastElementChild.insertBefore(icon, c.lastElementChild.firstChild);
@@ -2111,6 +2134,7 @@ function renderOverview(c, day = null, now = new Date()) {
       `${fmtNum(temp, 0)}° · ${word0}`, `voelt als ${fmtNum(o && o.feel != null ? o.feel : r0.apparent_temperature, 0)}° · vandaag ${fmtNum(mn, 0)}° tot ${fmtNum(mx, 0)}°`);
     // the tile's icon is the weather of this moment, drawn with the same icons as the hourly row below
     const heroEl = c.lastElementChild;
+    if (day) withCertainty(heroEl, day); // the day page of today says how sure the day is, as the other days do
     const heroIcon = svgEl('svg', { class: 'ico-big wicon-big', viewBox: '-10 -10 20 20', 'aria-hidden': 'true' });
     heroIcon.appendChild(weatherIcon(0, 0, kind0, night0));
     heroEl.insertBefore(heroIcon, heroEl.firstChild);
@@ -2355,26 +2379,14 @@ function renderInfo(c) {
       (state.updated ? `<br>laatste poging ${fmtTime(state.updated)}` : '')]);
     c.lastChild.querySelector('p').className = 'err';
   }
-  // the switch for the trial of UX-audit step 5, so the old and new look can be compared
-  const pv = h('section', 'card info proef-card');
-  const lab = h('label', 'switch-row');
-  const txt = h('span', 'switch-text');
-  txt.appendChild(h('span', 'switch-title', 'Proefversie: nieuwe weergave'));
-  txt.appendChild(h('span', 'switch-desc', 'Lucht achter de kop, het weer in een zin met een boompje, en knoppen in zwart-wit. Uit = de weergave van daarvoor.'));
-  lab.appendChild(txt);
-  const sw = h('input', 'switch'); sw.type = 'checkbox'; sw.setAttribute('role', 'switch'); sw.checked = !!state.proef; sw.id = 'proefSwitch';
-  sw.addEventListener('change', () => setProef(sw.checked));
-  lab.appendChild(sw);
-  pv.appendChild(lab);
-  c.appendChild(pv);
   const SEE = [
-    'De app toont de verwachting voor de gekozen plaats. <b>Overzicht</b> draagt de naam van de plaats (tik erop om een andere te kiezen) en begint met het weer van nu: de temperatuur, het weerbeeld, hoe koud het voelt en de laagste en hoogste temperatuur van vandaag. Daaronder de regenregel: hoe lang het droog blijft, of wanneer het gaat regenen; komt er regen aan, dan kleurt de regel blauw met een mini-radar per 5 minuten. Daaronder het weer per uur en de komende zeven dagen, met per dag het weerbeeld, de laagste en hoogste temperatuur en de kans op regen. Tik op de regenbalk voor <b>Regen</b> (de radar voor de komende 2 uur en de neerslag per uur met de kans op regen) en op de uurstrook voor <b>Per uur</b>, dat temperatuur en weerbeeld per uur naast elkaar zet. Tik op een dag in de lijst voor dezelfde pagina voor alleen die dag (vandaag de hele dag vanaf middernacht, met een stippellijn op nu; de uren daarvoor zijn wat het model verwachtte, geen metingen); voor de dagen na morgen komt die uit het ECMWF-ensemble: de lijn is de middelste van de 51 berekeningen en de band laat zien waar 90% van de berekeningen zit (de 5% hoogste en de 5% laagste vallen erbuiten, zoals de lichte band van de KNMI-pluim), voor temperatuur én regen; bij regen noemt de tooltip die band gewoon als "0,0 tot 0,4 mm", omdat de middelste waarde bij buien bijna altijd 0 is, en de boompjes tonen de wind van de middelste berekening; "‹ Overzicht" linksboven brengt je terug. Trek een pagina bovenaan omlaag om te verversen. <b>Temperatuur</b>, <b>Wind</b> en <b>Bewolking</b> tonen elk hun eigen verloop.',
+    'De app toont de verwachting voor de gekozen plaats. <b>Overzicht</b> draagt de naam van de plaats (tik erop om een andere te kiezen) en begint met het weer van nu: de temperatuur, het weerbeeld, hoe koud het voelt en de laagste en hoogste temperatuur van vandaag. Daaronder de regenregel: hoe lang het droog blijft, of wanneer het gaat regenen; komt er regen aan, dan kleurt de regel blauw met een mini-radar per 5 minuten. Daaronder het weer per uur en de komende zeven dagen, met per dag het weerbeeld, de laagste en hoogste temperatuur en de kans op regen. Tik op de regenbalk voor <b>Regen</b> (de radar voor de komende 2 uur en de neerslag per uur met de kans op regen) en op de uurstrook voor <b>Per uur</b>, dat temperatuur en weerbeeld per uur naast elkaar zet. Tik op een dag in de lijst voor dezelfde pagina voor alleen die dag (vandaag de hele dag vanaf middernacht, met een stippellijn op nu; de uren daarvoor zijn wat het model verwachtte, geen metingen); voor de dagen na morgen komt die uit het ECMWF-ensemble: de lijn is de middelste van de 51 berekeningen en de band laat zien waar 8 van de 10 berekeningen zitten (de hoogste en de laagste 10% vallen erbuiten), voor temperatuur én regen; bij regen noemt de tooltip die band gewoon als "0,0 tot 0,4 mm", omdat de middelste waarde bij buien bijna altijd 0 is, en de boompjes tonen de wind van de middelste berekening; "‹ Overzicht" linksboven brengt je terug. Trek een pagina bovenaan omlaag om te verversen. <b>Temperatuur</b>, <b>Wind</b> en <b>Bewolking</b> tonen elk hun eigen verloop.',
     'Zoomen: spreid twee vingers op een grafiek om in te zoomen, knijp ze samen om weer verder vooruit te kijken (tot 48 uur). De grafiek begint altijd bij nu; de titel van de kaart toont hoeveel uur je ziet en de keuze wordt onthouden. Sleep met één vinger over een grafiek om de waarden van dat moment te zien; de stippellijn volgt je vinger.',
     'De achtergrond van elke grafiek volgt de zon: warm bij daglicht, grijzer naarmate er meer bewolking is, donker in de nacht, met schemer ertussen. De zonnetjes boven de grafiek staan op zonsopkomst en -ondergang en tonen het weerbeeld van dat moment.',
     'Het <b>weerbeeld</b> van een verwacht uur (zonnig, half bewolkt, dunne bewolking, bewolkt, regen) komt uit de bewolking van het model: minder dan 30% is zonnig, 30 tot 70% half bewolkt. Is de lucht (bijna) dicht, dan kijkt de app hoeveel zon er nog doorkomt, vergeleken met een heldere hemel: veel zon betekent losse wolken (half bewolkt), een flink deel betekent een sluier van dunne, hoge wolken (dunne bewolking: zon boven drie strepen) en weinig zon een dik wolkendek (bewolkt). Bij lage zon en \'s nachts beslissen de lagen: alleen hoge wolken is dunne bewolking. Vanaf 0,1 mm in het uur is het regen. Het weerbeeld van nu in de tegel komt uit de metingen.',
     'Bovenaan <b>Overzicht</b> staat het weer per uur, zo ver als ICON-D2 vooruit rekent (tot 48 uur): het icoontje met dezelfde regels als de uurrij op Per uur en de temperatuur van ICON-D2. Nu komt, net als de kaart van nu, uit de metingen; om middernacht staat de naam van de nieuwe dag, en zonsopkomst en -ondergang staan als eigen vakje tussen de uren. Schemer staat op Per uur en de dagpagina\'s. Veeg opzij voor de volgende uren; tik erop voor Per uur.',
     'Het <b>weerbeeld van een dag</b> in Overzicht kijkt alleen naar de uren dat het licht is. Elk licht uur krijgt zijn eigen icoontje, met dezelfde regels als de uurrij op Per uur, en de dag krijgt het middelste daarvan (de mediaan). Een strak blauwe dag die in de laatste twee lichte uren dichttrekt, blijft zo een zonnige dag. Laagste en hoogste temperatuur gaan over de hele dag. Het getal met de druppel onder het icoontje is de kans op een natte dag: het deel van de ensembleberekeningen met minstens 0,5 mm in de lichte uren van die dag, getoond vanaf 10%; regen in de nacht telt niet mee, net als bij het icoontje. De balk loopt van laagste naar hoogste temperatuur op de schaal van alle dagen samen; de stip is de temperatuur van nu.',
-    'De dagen in Overzicht gebruiken zolang het kan dezelfde modellen als de rest van de app: HARMONIE voor het weerbeeld, ICON-D2 voor de temperatuur en het ICON-D2-ensemble voor de kans, meestal vandaag en morgen. Voor de dagen daarna komt alles uit het <b>ECMWF-ensemble</b>, dat ook achter de pluim van het KNMI zit: 51 berekeningen op een raster van 25 km. Elke berekening krijgt zijn eigen dag met dezelfde regels; de dag krijgt het middelste icoontje van de 51 en de middelste laagste en hoogste temperatuur, zoals de pluim. Het vage deel van de balk is waar de middelste helft van de berekeningen zit; hoe breder, hoe onzekerder.',
+    'De dagen in Overzicht gebruiken zolang het kan dezelfde modellen als de rest van de app: HARMONIE voor het weerbeeld, ICON-D2 voor de temperatuur en het ICON-D2-ensemble voor de kans, meestal vandaag en morgen. Voor de dagen daarna komt alles uit het <b>ECMWF-ensemble</b>, dat ook achter de pluim van het KNMI zit: 51 berekeningen op een raster van 25 km. Elke berekening krijgt zijn eigen dag met dezelfde regels; de dag krijgt het middelste icoontje van de 51 en de middelste laagste en hoogste temperatuur, zoals de pluim. Het vage deel van de balk loopt van de lage minimumtemperatuur tot de hoge maximumtemperatuur van 8 van de 10 berekeningen; hoe breder, hoe onzekerder.',
   ];
   const SRC = [
     '<b>Nu-waarden</b> (temperatuur, wind) zijn echte metingen van het dichtstbijzijnde KNMI-weerstation, elke 10 minuten bijgewerkt, via de feed van Buienradar. De tegel noemt het station en de afstand.',
@@ -2382,7 +2394,7 @@ function renderInfo(c) {
     '<b>Radar</b> voor de komende 2 uur: Buienradar-nowcast, een verplaatsing van het actuele radarbeeld.',
     '<b>Verwachting per uur</b> (neerslag, wind, bewolking): het KNMI-weermodel HARMONIE-AROME, dat elk uur opnieuw rekent op een raster van 2 bij 2 km. In een eigen verificatie tegen KNMI-metingen bleek dit model voor regen op 1 tot 2 dagen vooruit het beste van de fijnmazige modellen.',
     '<b>Temperatuur</b>: het model ICON-D2 van de Duitse weerdienst (2,2 km). In dezelfde verificatie zat HARMONIE gemiddeld een halve graad te warm en zat ICON-D2 er duidelijk dichter bij.',
-    '<b>Kans op regen</b> en de <b>onzekerheidsband</b>: het ensemble ICON-D2-EPS van de Duitse weerdienst, twintig berekeningen met kleine verschillen in de beginsituatie. De kans is het aandeel berekeningen met minstens 0,1 mm in dat uur; met twintig berekeningen gaat die in stappen van 5%, dus "< 5%" betekent: geen van de twintig. De band toont waar 80% van de berekeningen zit. Bij temperatuur hoort de band bij hetzelfde model als de lijn; bij neerslag en wind komt hij voorlopig van een ander model dan de verwachting, waardoor ze elkaar soms tegenspreken.',
+    '<b>Kans op regen</b> en de <b>onzekerheidsband</b>: het ensemble ICON-D2-EPS van de Duitse weerdienst, twintig berekeningen met kleine verschillen in de beginsituatie. De kans is het aandeel berekeningen met minstens 0,1 mm in dat uur; met twintig berekeningen gaat die in stappen van 5%, dus "< 5%" betekent: geen van de twintig. De band toont waar 8 van de 10 berekeningen zitten; overal in de app is de band dezelfde: grafieken, dagpagina en het vage deel van de balk in de weeklijst. Op een dagpagina staat ook een woord voor hoe zeker de dag is, uit de breedte van die band bij de hoogste temperatuur: smaller dan 2 graden is zeker, 2 tot 4 graden vrij zeker, 4 graden of meer onzeker. Bij temperatuur hoort de band bij hetzelfde model als de lijn; bij neerslag en wind komt hij voorlopig van een ander model dan de verwachting, waardoor ze elkaar soms tegenspreken.',
     '<b>Eerstvolgende neerslag</b> volgt eerst de radar. Daarna telt een uur als nat als het KNMI-model minstens 0,5 mm geeft; de kans van het ensemble staat erbij maar beslist niet. Anders staat er "Droog" met hoe lang (zo ver als radar en model kijken), en het natste uur eronder als dat er is. Is de radar droog, dan toont de kaart Komende 2 uur één regel in plaats van een lege grafiek.',
     '<b>Zonder verbinding</b> toont de app de laatst opgehaalde gegevens met het tijdstip waarop ze zijn opgehaald. Radar van meer dan een half uur oud, radar die al voorbij is en metingen van meer dan een uur oud worden dan niet meer getoond.',
     'Modeldata loopt via <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a>. Zonsopkomst, schemer en zonshoogte worden in de app zelf berekend.',
@@ -2478,7 +2490,7 @@ function renderTemp(c) {
       { kind: 'line', name: 'Gevoelstemperatuur', color: 'var(--s1)', points: instantPts(T, 'apparent_temperature'), secondary: true, smooth: 'soft' },
     ],
     fmt: v => fmtNum(v, 1), directLabels: 'minmax', tipTime: p => fmtDayTime(p.t), aria: 'Temperatuur per uur',
-    tipExtra: t => { const r = withBand && state.ens && state.ens.bands.temperature_2m.find(q => Math.abs(q.t.getTime() - t) < HOUR / 2); return r ? `onzekerheid ${fmtNum(r.lo, 0)}° tot ${fmtNum(r.hi, 0)}°` : null; },
+    tipExtra: t => { const r = withBand && state.ens && state.ens.bands.temperature_2m.find(q => Math.abs(q.t.getTime() - t) < HOUR / 2); return r ? `8 van de 10: ${fmtNum(r.lo, 0)}° tot ${fmtNum(r.hi, 0)}°` : null; },
   });
   legend(k1.el, [{ name: 'Temperatuur (2 m)', color: 'var(--s1)' }, { name: 'Gevoelstemperatuur', color: 'var(--s1)', dashed: true }, ...(withBand ? ensLegend() : [])]);
   k1.tableHost.appendChild(dataTable(T.instant, [{ label: 'Uur', get: p => fmtDayTime(p.t) }, { label: '°C', num: true, get: p => fmtNum(p.temperature_2m, 1) }, { label: 'Gevoel', num: true, get: p => fmtNum(p.apparent_temperature, 1) }]));
@@ -2509,7 +2521,7 @@ function renderWind(c) {
     ],
     fmt: v => fmtNum(v, 0), directLabels: 'peak', arrows, tipTime: p => fmtDayTime(p.t),
     tipNote: (s, p) => (s.name === 'Wind' ? ` · ${beaufort(p.v)} Bft · ${compass(p.row.wind_direction_10m)}` : ''),
-    tipExtra: t => { const r = state.ens && state.ens.bands.wind_speed_10m.find(q => Math.abs(q.t.getTime() - t) < HOUR / 2); return r ? `onzekerheid ${fmtNum(r.lo, 0)} tot ${fmtNum(r.hi, 0)} km/u` : null; },
+    tipExtra: t => { const r = state.ens && state.ens.bands.wind_speed_10m.find(q => Math.abs(q.t.getTime() - t) < HOUR / 2); return r ? `8 van de 10: ${fmtNum(r.lo, 0)} tot ${fmtNum(r.hi, 0)} km/u` : null; },
     onScrub: p => { if (p) { const iv = H.interval.find(q => q.t.getTime() === p.t.getTime()); setTree(tree, p.v, p.row.wind_direction_10m, fmtDayTime(p.t), iv ? iv.precipitation : null); } else treeNow(); },
     aria: 'Windsnelheid en windstoten per uur volgens HARMONIE',
   });
@@ -2549,7 +2561,7 @@ function renderCloud(c) {
     ],
     fmt: v => fmtNum(v, 0), tipTime: p => fmtDayTime(p.t),
     tipNote: (s, p) => (s.name === 'Totaal' ? ` · midden ${p.row.cloud_cover_mid}% · hoog ${p.row.cloud_cover_high}%` : ''),
-    tipExtra: t => { const r = state.ens && state.ens.bands.cloud_cover.find(q => Math.abs(q.t.getTime() - t) < HOUR / 2); return r ? `ensemble ${fmtNum(r.lo, 0)} tot ${fmtNum(r.hi, 0)}%` : null; },
+    tipExtra: t => { const r = state.ens && state.ens.bands.cloud_cover.find(q => Math.abs(q.t.getTime() - t) < HOUR / 2); return r ? `8 van de 10: ${fmtNum(r.lo, 0)} tot ${fmtNum(r.hi, 0)}%` : null; },
     aria: 'Bewolking per uur volgens HARMONIE',
   });
   legend(k1.el, [{ name: 'Totale bedekking', color: 'var(--cloud-hi)', note: 'donkerder = meer bewolking' }, { name: 'Lage bewolking (< 2 km)', color: 'var(--cloud-mid)', dashed: true }, ...ensLegend('var(--cloud-hi)')]);
@@ -3335,7 +3347,7 @@ function runTests() {
   test('week: mediaan-icoon bij even aantal: halverwege, halven naar boven', () => {
     eq(medianKind([0, 0, 2]), 'clear'); eq(medianKind([0, 2]), 'partly'); eq(medianKind([1, 2]), 'thin', 'half bewolkt en dun: dun'); eq(medianKind([1, 3]), 'thin'); eq(medianKind([4, 0, 4]), 'rain'); eq(medianKind([]), null);
   });
-  test('ECMWF: per lid een dag, dan mediaan over de leden; 25/75 % als band; kans = deel natte leden', () => {
+  test('ECMWF: per lid een dag, dan mediaan over de leden; 10/90 % als band; kans = deel natte leden', () => {
     const json = mkEnsJson(3, 3, ECMWF_VARS, (v, m, i) =>
       v === 'temperature_2m' ? 5 + m + (i % 24 === 14 ? 5 : 0)
       : v === 'precipitation' ? (m === 1 && i === 11 ? 1 : m === 2 && i === 3 ? 5 : 0)
@@ -3345,13 +3357,13 @@ function runTests() {
     const e = parseEcmwf(json, 52.37, 4.9, new Date(2026, 10, 2, 10));
     eq(e.members, 3); eq(e.days.length, 2, '72 uur: twee hele dagen');
     const [d1, d2] = e.days;
-    eq(d1.day.getDate(), 2); eq(d1.mn, 6); eq(d1.mx, 11); near(d1.mnLo, 5.5, 1e-9); near(d1.mxHi, 11.5, 1e-9);
+    eq(d1.day.getDate(), 2); eq(d1.mn, 6); eq(d1.mx, 11); near(d1.mnLo, 5.2, 1e-9); near(d1.mxHi, 11.8, 1e-9); near(d1.mxLo, 10.2, 1e-9);
     near(d1.chance, 1 / 3, 1e-9); eq(d1.kind, 'clear', 'één regenuur maakt de dag niet nat');
     eq(d2.kind, 'cloud', 'twee van drie leden bewolkt'); eq(d2.chance, 0);
     eq(e.hours.length, 71, 'per uur zolang het uur erna er is');
     const h14 = e.hours[14], h10 = e.hours[10];
-    eq(h14.tMed, 11); near(h14.tLo, 10.1, 1e-9); near(h14.tHi, 11.9, 1e-9); // 5 en 95 %: de band bevat 90 % van de leden
-    eq(h10.pMed, 0); near(h10.pHi, 0.9, 1e-9); near(h10.chance, 1 / 3, 1e-9);
+    eq(h14.tMed, 11); near(h14.tLo, 10.2, 1e-9); near(h14.tHi, 11.8, 1e-9); // 10 en 90 %: de band bevat 8 van de 10 leden
+    eq(h10.pMed, 0); near(h10.pHi, 0.8, 1e-9); near(h10.chance, 1 / 3, 1e-9);
     eq(h14.kmh, 15, 'wind van de middelste run'); eq(h14.dir, 110, 'met zijn eigen richting'); eq(e.hours[40].kind, 'cloud', 'mediaan-icoon per uur');
   });
   test('ICON-D2-ensemble: dagkans = deel van de leden met ≥ 0,5 mm in de lichte uren', () => {
@@ -3750,29 +3762,46 @@ function runTests() {
       ok(weatherLine(new Date(NOW)).endsWith('daarna droog.'), 'daarna droog');
     } finally { state.forecast = saved.f; state.obs = saved.o; state.ens = saved.e; state.ecmwf = saved.c; state.nowcast = saved.n; }
   });
-  test('v25: schakelaar proefversie: zin, boom, lucht en neutrale knoppen aan en uit', () => {
-    const saved = { f: state.forecast, o: state.obs, e: state.ens, c: state.ecmwf, t: state.tab, p: state.proef, n: nav.stack };
+  test('v25: zin, boom met windveld, lucht van nu en neutrale knoppen', () => {
+    const saved = { f: state.forecast, o: state.obs, e: state.ens, c: state.ecmwf, t: state.tab, n: nav.stack };
     try {
       state.forecast = withDays(mkJson(), NOW, 52.37, 4.9); state.obs = null; state.ens = null; state.ecmwf = null;
-      nav.stack = []; state.tab = 'overview'; state.proef = true; render();
+      nav.stack = []; state.tab = 'overview'; render();
       const nc = $('content').querySelector('.now-card');
       ok(nc.querySelector('.now-say') && !nc.querySelector('.now-feel'), 'zin in plaats van voelt-als');
-      ok(nc.querySelector('.now-tree svg .treeg'), 'boompje'); ok($('screen').classList.contains('sky'), 'lucht achter de kop');
+      ok(nc.querySelector('.now-tree svg .treeg'), 'boompje'); ok(nc.querySelector('.now-tree svg .windfield .streak'), 'met windveld');
+      ok($('screen').classList.contains('sky'), 'lucht achter de kop');
       ok(/^rgb\(\d+,\d+,\d+\)$/.test($('screen').style.getPropertyValue('--sky-now')), 'luchtkleur gezet');
-      ok(document.documentElement.classList.contains('proef'), 'neutrale knoppen');
       eq(getComputedStyle(document.querySelector('.tab[aria-pressed="true"]')).color, getComputedStyle(document.body).color, 'actieve tab in labelkleur');
       state.tab = 'temp'; render(); ok(!$('screen').classList.contains('sky'), 'lucht alleen op Overzicht');
-      state.tab = 'info'; render(); const sw = $('proefSwitch'); ok(sw && sw.checked, 'schakelaar onder Info, aan');
-      sw.checked = false; sw.dispatchEvent(new Event('change')); eq(state.proef, false);
-      ok(!document.documentElement.classList.contains('proef'));
-      state.tab = 'overview'; render();
-      const nc2 = $('content').querySelector('.now-card');
-      ok(nc2.querySelector('.now-feel') && !nc2.querySelector('.now-say') && !nc2.querySelector('.now-tree'), 'uit: zoals daarvoor');
-      ok(!$('screen').classList.contains('sky'));
+      state.tab = 'info'; render(); ok(!$('content').querySelector('input[type="checkbox"]'), 'geen proefschakelaar meer');
     } finally {
       state.forecast = saved.f; state.obs = saved.o; state.ens = saved.e; state.ecmwf = saved.c; state.tab = saved.t; nav.stack = saved.n;
-      state.proef = saved.p; try { localStorage.setItem('regen.proef', saved.p ? '1' : '0'); } catch (e) {} render();
+      try { localStorage.removeItem('regen.proef'); } catch (e) {} render();
     }
+  });
+  test('v26: één band (8 van de 10) overal, met één naam; een woord voor hoe zeker een dag is', () => {
+    eq(ENS_BAND.join(), '0.1,0.9', 'band 10–90%');
+    const saved = { e: state.ens, f: state.forecast };
+    try {
+      state.ens = { bands: { temperature_2m: [] }, prob: [] };
+      eq(ensLegend()[0].name, '8 van de 10 berekeningen', 'naam in de legenda');
+      eq(certainty({ day: new Date(2026, 10, 9), mxLo: 8, mxHi: 9.5 }).word, 'zeker');
+      eq(certainty({ day: new Date(2026, 10, 9), mxLo: 7, mxHi: 10 }).word, 'vrij zeker');
+      eq(certainty({ day: new Date(2026, 10, 9), mxLo: 5, mxHi: 11 }).word, 'onzeker');
+      // an ECMWF day: the members' daily maxima give the band
+      const e = parseEcmwf(mkEnsJson(3, 10, ECMWF_VARS, (v, m, i) => v === 'temperature_2m' ? 5 + m + (i % 24 === 14 ? 5 : 0)
+        : v === 'wind_speed_10m' ? 10 : v === 'wind_direction_10m' ? 200 : v === 'shortwave_radiation' ? null : 0), 52.37, 4.9, new Date(2026, 10, 2, 0));
+      const d = e.days[1];
+      ok(d.mxLo <= d.mx && d.mx <= d.mxHi && d.mnLo <= d.mn, 'band om de mediaan');
+      eq(certainty(d).word, d.mxHi - d.mxLo < 2 ? 'zeker' : d.mxHi - d.mxLo < 4 ? 'vrij zeker' : 'onzeker');
+      // the day tile carries the word, its numbers in the tooltip
+      const host = h('div'); dayHero(host, { ...d, chance: 0.05 });
+      const hint = host.querySelector('.hero .h');
+      ok(/ · (zeker|vrij zeker|onzeker)$/.test(hint.textContent), 'woord in de dagtegel: ' + hint.textContent);
+      ok(hint.title.startsWith('8 van de 10 berekeningen: hoogste temperatuur'), 'getallen in de tooltip');
+      state.ens = null; eq(certainty({ day: new Date(2026, 10, 9) }), null, 'zonder ensemble geen woord');
+    } finally { state.ens = saved.e; state.forecast = saved.f; }
   });
 
   nav.stack = []; // tests that open a page and do not come back leave it behind; the app is back on a tab

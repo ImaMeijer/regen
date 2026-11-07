@@ -9,8 +9,8 @@
   --label-3: #6e6e73;  /* 5,1:1 op de kaart, 4,5:1 op de achtergrond (was #8e8e93: 3,3:1) */
   --separator: #e3e3e8;
   --grid: #ededf1;
-  --tint: #226dc9;     /* bediening: 5,1:1 op wit (was #2a78d6 = --s1: 4,4:1) */
-  --tint-wash: rgba(34, 109, 201, 0.10);
+  --tint: #000000;     /* controls are neutral (UX-audit B9): the label colour; blue is for data only (--s1) */
+  --tint-wash: rgba(128, 128, 128, 0.14);
   --s1: #2a78d6;   /* HARMONIE */
   --s2: #eb6834;   /* ICON-D2 */
   --s3: #1baf7a;   /* AROME */
@@ -64,8 +64,8 @@
     --label-3: #8e8e94;
     --separator: #2c2c2e;
     --grid: #2a2a2d;
-    --tint: #3987e5;
-    --tint-wash: rgba(57, 135, 229, 0.16);
+    --tint: #ffffff;
+    --tint-wash: rgba(128, 128, 128, 0.20);
     --rain-wash: rgba(57, 135, 229, 0.18);
     --s1: #3987e5;
     --s2: #d95926;
@@ -99,8 +99,8 @@
   --label-3: #8e8e94;  /* 5,2:1 op de kaart (was #6f6f76: 3,4:1) */
   --separator: #2c2c2e;
   --grid: #2a2a2d;
-  --tint: #3987e5;
-  --tint-wash: rgba(57, 135, 229, 0.16);
+  --tint: #ffffff;
+  --tint-wash: rgba(128, 128, 128, 0.20);
   --rain-wash: rgba(57, 135, 229, 0.18);
   --s1: #3987e5;
   --s2: #d95926;
@@ -526,7 +526,6 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .now-line { display: flex; align-items: center; gap: 10px; }
 .now-temp { font-size: var(--t-now); font-weight: 300; letter-spacing: -0.03em; line-height: 1; font-variant-numeric: tabular-nums; }
 .now-cond { font-size: var(--t-title3); font-weight: 600; letter-spacing: -0.01em; }
-.now-feel { font-size: var(--t-foot); color: var(--label-2); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .now-icon { width: 34px; height: 34px; overflow: visible; flex: none; }
 .now-card .rain-row { border-top: 1px solid var(--separator); border-bottom: 0; min-height: 36px; }
 .card.hours { padding-top: 0; }
@@ -588,7 +587,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .info-foot { font-size: var(--t-foot); color: var(--label-3); margin: var(--sp-4) var(--sp-1) 0; line-height: 1.4; }
 @media (prefers-reduced-motion: reduce) { .faq summary .chev { transition: none; } }
 
-/* ---------- v25: trial of UX-audit step 5, behind the switch under Info (:root.proef) ---------- */
+/* ---------- v25: UX-audit step 5: sky, sentence, tree, neutral controls ---------- */
 /* C2: the header of Overzicht in the tint of the sky of now, fading into the page */
 .screen.sky {
   background: linear-gradient(180deg, var(--sky-now) 0, var(--sky-now) calc(40px + env(safe-area-inset-top)), var(--bg) calc(230px + env(safe-area-inset-top)));
@@ -600,36 +599,19 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .now-top { position: relative; }
 .now-top.with-tree .now-line { padding-right: 60px; }
 .now-tree { position: absolute; right: var(--sp-2); top: -6px; width: 56px; height: 64px; border-radius: var(--r-inner); }
-.now-tree svg { width: 100%; height: 100%; overflow: visible; }
+.now-tree svg { width: 100%; height: 100%; overflow: hidden; border-radius: var(--r-inner); } /* the wind field stays in its box, as on Wind */
 .now-tree:active { background: var(--tint-wash); }
 .now-tree .treeg .shadow { fill: rgba(0, 0, 0, 0.12); }
+.now-tree .windfield line { stroke-width: calc(var(--wstroke, 1.4) * 2); }
 /* B9: controls neutral, blue only for rain and data (Apple Weer) */
-:root.proef { --tint: var(--label); --tint-wash: rgba(128, 128, 128, 0.14); }
-:root.proef .hero .ico-big { color: var(--s1); }
-:root.proef .error-state button { color: var(--bg); }
-:root.proef .loc-pill .chev, :root.proef .back-btn .ico { color: var(--label-2); }
-/* the switch itself, iOS style */
-.switch-row { display: flex; align-items: center; gap: var(--sp-3); cursor: pointer; }
-.switch-text { flex: 1; display: flex; flex-direction: column; gap: 2px; }
-.switch-title { font-size: var(--t-body); font-weight: 600; }
-.switch-desc { font-size: var(--t-foot); color: var(--label-2); line-height: 1.35; }
-.switch {
-  appearance: none; -webkit-appearance: none; flex: none; margin: 0; cursor: pointer;
-  width: 51px; height: 31px; border-radius: var(--r-pill); background: var(--separator); position: relative;
-  transition: background var(--dur-fast);
-}
-.switch::after {
-  content: ""; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 50%;
-  background: #fff; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25); transition: transform var(--dur-fast) var(--ease);
-}
-.switch:checked { background: var(--s3); }
-.switch:checked::after { transform: translateX(20px); }
-@media (prefers-reduced-motion: reduce) { .switch, .switch::after { transition: none; } }
+.hero .ico-big { color: var(--s1); }
+.error-state button { color: var(--bg); }
+.loc-pill .chev, .back-btn .ico { color: var(--label-2); }
 /* the sentence is a line longer than the feels-like line: Overzicht wins that back in the header and the card of
    now, so it still fits one iPhone screen (the status bar inset already keeps the title clear of the clock) */
-:root.proef .top.place { padding-top: calc(var(--sp-1) + env(safe-area-inset-top)); }
-:root.proef .top.place .info-btn { top: calc(7px + env(safe-area-inset-top)); }
-:root.proef .now-card { padding-top: var(--sp-2); }
-:root.proef .now-top { padding-bottom: 6px; }
-:root.proef .now-card .rain-row { min-height: 32px; padding-top: 5px; padding-bottom: 5px; }
-:root.proef #content.ov .card.hours .hour-strip { padding-top: 6px; }
+.top.place { padding-top: calc(var(--sp-1) + env(safe-area-inset-top)); }
+.top.place .info-btn { top: calc(7px + env(safe-area-inset-top)); }
+.now-card { padding-top: var(--sp-2); }
+.now-top { padding-bottom: 6px; }
+.now-card .rain-row { min-height: 32px; padding-top: 5px; padding-bottom: 5px; }
+#content.ov .card.hours .hour-strip { padding-top: 6px; }
