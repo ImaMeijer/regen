@@ -1081,6 +1081,14 @@ function fmtProb(p) {
    nothing. An hour the radar half covers counts from where the radar stops. Otherwise dry up to 48 h, with the
    wettest hour below the threshold when there is one. */
 const RAIN_MM = 0.5;
+/* How long it stays dry, in words: "de komende 2 dagen", "de komende 30 uur", "de komende 2 uur" or "tot 19:05".
+   `until` is where the radar or the model stops looking, not where rain starts: hence "de komende …". */
+function dryFor(until, now = new Date()) {
+  const min = (until.getTime() - now.getTime()) / 60e3;
+  if (min >= 36 * 60) return `de komende ${Math.round(min / 1440)} dagen`;
+  if (min >= 110) return `de komende ${Math.round(min / 60)} uur`;
+  return `tot ${fmtTime(until)}`;
+}
 function nextRain(nowcast, H, ens, now = new Date()) {
   const slot = nowcast && nowcast.find(p => p.v >= 0.1 && p.t.getTime() + MIN5 > now.getTime());
   if (slot) return { kind: 'radar', t: slot.t, now: slot.t <= now, mmh: slot.v };
@@ -1270,9 +1278,9 @@ function render() {
   const minH = c.offsetHeight; c.style.minHeight = minH + 'px';
   c.textContent = '';
   try {
-    if (!state.forecast && !state.nowcast) {
+    if (!state.forecast && !state.nowcast && state.tab !== 'info') { // Info needs no data and holds the error codes
       if (!state.updated) { for (let i = 0; i < 2; i++) { const k = h('section', 'card'); k.appendChild(h('div', 'skeleton')); c.appendChild(k); } return; }
-      const e = h('p', 'empty', 'Geen data beschikbaar. ' + Object.values(state.errors).join(' · ')); c.appendChild(e); return;
+      c.appendChild(errorState()); return;
     }
     if (stale && state.tab !== 'info') c.appendChild(staleNote(stale));
     ({ rain: renderRainPage, overview: renderWeek, hours: renderHours, day: renderDayPage, temp: renderTemp, wind: renderWind, cloud: renderCloud, info: renderInfo })[state.tab](c);
@@ -1282,6 +1290,17 @@ function render() {
   }
 }
 
+/* Nothing to show at all: a sentence in plain words and a button; the technical reason (HTTP 503 …) is under Info. */
+function errorState() {
+  const s = h('section', 'error-state');
+  s.setAttribute('role', 'alert');
+  s.appendChild(h('p', null, 'De verwachting kon niet worden opgehaald.'));
+  s.appendChild(h('p', 'h', 'Controleer je verbinding en probeer het opnieuw.'));
+  const btn = h('button', null, 'Opnieuw proberen'); btn.type = 'button';
+  btn.addEventListener('click', () => { btn.disabled = true; btn.textContent = 'Bezig met ophalen…'; load(); });
+  s.appendChild(btn);
+  return s;
+}
 function staleNote(stale) {
   const n = h('div', 'warn stale');
   n.setAttribute('role', 'status');
@@ -1421,8 +1440,10 @@ function spanTitle() {
   const cur = state.horizon == null ? maxHorizonHours() : state.horizon;
   return `Komende ${Math.round(cur)} uur`;
 }
+/* A card whose source failed: in words; the technical reason is under Info. */
 function errorNote(parent, key, what) {
-  if (state.errors[key]) parent.appendChild(h('p', 'empty', `${what} niet beschikbaar (${state.errors[key]})`));
+  const e = state.errors[key];
+  if (e) parent.appendChild(h('p', 'empty', e === 'verouderd' ? `Geen actuele ${what.toLowerCase()}.` : `${what} is nu niet bereikbaar.`));
 }
 
 /* ---------------- Regen ---------------- */
@@ -1436,7 +1457,7 @@ function renderRain(c) {
   hero.innerHTML = '<svg class="ico-big" viewBox="0 0 24 24"><path d="M7 15.5a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 7.5h.5a4 4 0 0 1 0 8H7z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9 18l-1 3M13 18l-1 3M17 18l-1 3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
   const ht = h('div');
   ht.appendChild(h('div', 'l', 'Eerstvolgende neerslag'));
-  const big = h('div', 'big'); const hint = h('div', 'h');
+  const big = h('div', 'big'); const hint = h('div', 'h'); let sub = null;
   const nr = nextRain(nc, H, state.ens, now);
   if (!nr) big.textContent = '–';
   else if (nr.kind === 'radar') { big.textContent = nr.now ? 'Nu' : `om ${fmtTime(nr.t)}`; hint.textContent = `${fmtMm(nr.mmh)} mm/u · radar`; }
@@ -1444,28 +1465,40 @@ function renderRain(c) {
     big.textContent = fmtDayTime(nr.t);
     hint.textContent = `${fmtMm(nr.mm)} mm in dat uur${nr.prob != null ? ` · kans ${fmtProb(nr.prob)}` : ''}`;
   } else {
+    // the message in large type, not in the hint (UX-audit B7): "Droog" and for how long
     big.textContent = 'Droog';
+    sub = h('div', 'sub', dryFor(nr.until, now));
     // below the threshold there may still be a little: say so, so the hour bars below don't look like a contradiction
     hint.textContent = nr.maxMm == null ? `geen regen verwacht t/m ${fmtDayTime(nr.until)}`
-      : `geen regen van betekenis t/m ${fmtDayTime(nr.until)} · hooguit ${fmtMm(nr.maxMm)} mm ${fmtDayTime(nr.maxT)}`;
+      : `hooguit ${fmtMm(nr.maxMm)} mm, ${fmtWd(nr.maxT)} ${fmtHourRange(nr.maxT)}`;
   }
-  ht.appendChild(big); ht.appendChild(hint); hero.appendChild(ht);
+  ht.appendChild(big); if (sub) ht.appendChild(sub); ht.appendChild(hint); hero.appendChild(ht);
   c.appendChild(hero);
 
   // nowcast card
   const k1 = card('Komende 2 uur', []);
   c.appendChild(k1.el);
-  if (nc && nc.length) {
+  if (nc && nc.length && nc.some(p => p.v > 0)) {
     const tMin = new Date(Math.min(now.getTime(), nc[0].t.getTime())), tMax = new Date(nc[nc.length - 1].t.getTime() + MIN5); // start at 'nu' so the now-line sits at the left edge
     const pts = nc.map(p => ({ t: p.t, tEnd: new Date(p.t.getTime() + MIN5), v: p.v }));
     drawChart(k1.body, { sky: skyOf(),
       tMin, tMax, now, unit: 'mm/u', unitTip: 'mm/u', ticks: 'nowcast', yOpts: { zero: true, minSpan: 1, headroom: 1.15 },
       series: [{ kind: 'bar', name: 'Radar', color: 'var(--s1)', points: pts }],
-      fmt: fmtMm, directLabels: 'peak', emptyText: tMax - now >= 110 * 60e3 ? 'Droog in de komende 2 uur' : `Droog tot ${fmtTime(tMax)}`, tipTime: p => `${fmtTime(p.t)}–${fmtTime(p.tEnd)}`,
+      fmt: fmtMm, directLabels: 'peak', tipTime: p => `${fmtTime(p.t)}–${fmtTime(p.tEnd)}`,
       aria: 'Neerslagintensiteit per 5 minuten voor de komende 2 uur',
     });
     k1.tableHost.appendChild(dataTable(pts, [{ label: 'Tijd', get: p => fmtTime(p.t) }, { label: 'mm/u', num: true, get: p => fmtNum(p.v, 2) }]));
-    const sum2 = nc.reduce((s, p) => s + p.v / 12, 0);
+  } else if (nc && nc.length) {
+    // dry: one quiet line instead of an empty set of axes; the chart comes back as soon as there is a bar to draw
+    const tMax = new Date(nc[nc.length - 1].t.getTime() + MIN5);
+    const at = (state.fetched && state.fetched.nowcast && state.fetched.nowcast.at) || nc[0].t;
+    const line = h('p', 'quiet-line');
+    line.innerHTML = '<svg class="drop" viewBox="0 0 8 10" aria-hidden="true"><path d="M4 .6C2.6 2.6 1 4.5 1 6.4a3 3 0 0 0 6 0C7 4.5 5.4 2.6 4 .6z"/></svg>';
+    const span = h('span', null, `Droog${tMax - now >= 110 * 60e3 ? '' : ' tot ' + fmtTime(tMax)} volgens de radar `);
+    span.appendChild(h('span', 'when', `· ${fmtTime(at)}`));
+    line.appendChild(span);
+    k1.body.replaceWith(line);
+    k1.el.querySelector('.icon-btn').remove(); // a table of zeros says nothing
   } else errorNote(k1.body, 'nowcast', 'Radar');
 
   // HARMONIE card
@@ -1557,13 +1590,15 @@ function rainRow() {
   const nr = nextRain(nc, H, state.ens, now);
   const text = !nr ? 'Regen' : nr.kind === 'radar' ? (nr.now ? 'Nu regen' : `Regen om ${fmtTime(nr.t)}`)
     : nr.kind === 'model' ? `Regen ${sameDay(nr.t, now) ? 'om' : 'vanaf'} ${fmtWhen(nr.t)}`
-    : nc && nc.length && !H ? `Droog tot ${fmtTime(nr.until)}` : 'Droog';
-  const row = h('button', 'rain-row' + (nr && nr.kind !== 'dry' ? ' wet' : ''));
+    : `Droog ${dryFor(nr.until, now)}`;
+  const wet = !!nr && nr.kind !== 'dry';
+  const row = h('button', 'rain-row' + (wet ? ' wet' : ''));
   row.type = 'button';
   row.setAttribute('aria-label', `${text}. Open Regen`);
   row.innerHTML = '<svg class="drop" viewBox="0 0 8 10" aria-hidden="true"><path d="M4 .6C2.6 2.6 1 4.5 1 6.4a3 3 0 0 0 6 0C7 4.5 5.4 2.6 4 .6z"/></svg>';
   row.appendChild(h('span', 'rt', text));
-  if (nc && nc.length) {
+  // the mini radar only when it has something to show: an empty one read as a control that was switched off
+  if (wet && nc && nc.slice(0, 24).some(p => p.v >= 0.1)) {
     const n = 24, w = 4, H2 = 16, top = Math.max(2, ...nc.slice(0, n).map(p => p.v));
     const svg = svgEl('svg', { class: 'spark', viewBox: `0 0 ${n * w} ${H2}`, 'aria-hidden': 'true' });
     svg.appendChild(svgEl('line', { class: 'base', x1: 0, y1: H2 - 0.5, x2: n * w, y2: H2 - 0.5 }));
@@ -2127,8 +2162,15 @@ function renderInfo(c) {
     for (const p of paras) { const el = h('p'); el.innerHTML = p; s.appendChild(el); }
     c.appendChild(s);
   };
+  // the technical reason of a failed fetch lives here, not in the screens
+  const errs = Object.entries(state.errors || {});
+  if (errs.length) {
+    sec('Wat er niet lukte', [errs.map(([k, e]) => `${SOURCE_NAMES[k] || k}: ${e}`).join('<br>') +
+      (state.updated ? `<br>laatste poging ${fmtTime(state.updated)}` : '')]);
+    c.lastChild.querySelector('p').className = 'err';
+  }
   sec('Wat je ziet', [
-    'De app toont de verwachting voor de gekozen plaats. <b>Overzicht</b> begint met een regenbalk: of en wanneer het de komende twee uur regent, met een mini-radar per 5 minuten. Daaronder het weer per uur en de komende zeven dagen, met per dag het weerbeeld, de laagste en hoogste temperatuur en de kans op regen. Tik op de regenbalk voor <b>Regen</b> (de radar voor de komende 2 uur en de neerslag per uur met de kans op regen) en op de uurstrook voor <b>Per uur</b>, dat temperatuur en weerbeeld per uur naast elkaar zet. Tik op een dag in de lijst voor dezelfde pagina voor alleen die dag; voor de dagen na morgen komt die uit het ECMWF-ensemble: de lijn is de middelste van de 51 berekeningen en de band laat zien waar 90% van de berekeningen zit (de 5% hoogste en de 5% laagste vallen erbuiten, zoals de lichte band van de KNMI-pluim), voor temperatuur én regen; bij regen noemt de tooltip die band gewoon als "0,0 tot 0,4 mm", omdat de middelste waarde bij buien bijna altijd 0 is, en de boompjes tonen de wind van de middelste berekening; "‹ Overzicht" brengt je terug. <b>Temperatuur</b>, <b>Wind</b> en <b>Bewolking</b> tonen elk hun eigen verloop.',
+    'De app toont de verwachting voor de gekozen plaats. <b>Overzicht</b> begint met een regenbalk: hoe lang het droog blijft, of wanneer het gaat regenen; komt er regen aan, dan kleurt de balk blauw met een mini-radar per 5 minuten. Daaronder het weer per uur en de komende zeven dagen, met per dag het weerbeeld, de laagste en hoogste temperatuur en de kans op regen. Tik op de regenbalk voor <b>Regen</b> (de radar voor de komende 2 uur en de neerslag per uur met de kans op regen) en op de uurstrook voor <b>Per uur</b>, dat temperatuur en weerbeeld per uur naast elkaar zet. Tik op een dag in de lijst voor dezelfde pagina voor alleen die dag; voor de dagen na morgen komt die uit het ECMWF-ensemble: de lijn is de middelste van de 51 berekeningen en de band laat zien waar 90% van de berekeningen zit (de 5% hoogste en de 5% laagste vallen erbuiten, zoals de lichte band van de KNMI-pluim), voor temperatuur én regen; bij regen noemt de tooltip die band gewoon als "0,0 tot 0,4 mm", omdat de middelste waarde bij buien bijna altijd 0 is, en de boompjes tonen de wind van de middelste berekening; "‹ Overzicht" brengt je terug. <b>Temperatuur</b>, <b>Wind</b> en <b>Bewolking</b> tonen elk hun eigen verloop.',
     'Zoomen: spreid twee vingers op een grafiek om in te zoomen, knijp ze samen om weer verder vooruit te kijken (tot 48 uur). De grafiek begint altijd bij nu; de titel van de kaart toont hoeveel uur je ziet en de keuze wordt onthouden. Sleep met één vinger over een grafiek om de waarden van dat moment te zien; de stippellijn volgt je vinger.',
     'De achtergrond van elke grafiek volgt de zon: warm bij daglicht, grijzer naarmate er meer bewolking is, donker in de nacht, met schemer ertussen. De zonnetjes boven de grafiek staan op zonsopkomst en -ondergang en tonen het weerbeeld van dat moment.',
     'Het <b>weerbeeld</b> van een verwacht uur (zonnig, half bewolkt, dunne bewolking, bewolkt, regen) komt uit de bewolking van het model: minder dan 30% is zonnig, 30 tot 70% half bewolkt. Is de lucht (bijna) dicht, dan kijkt de app hoeveel zon er nog doorkomt, vergeleken met een heldere hemel: veel zon betekent losse wolken (half bewolkt), een flink deel betekent een sluier van dunne, hoge wolken (dunne bewolking: zon boven drie strepen) en weinig zon een dik wolkendek (bewolkt). Bij lage zon en \'s nachts beslissen de lagen: alleen hoge wolken is dunne bewolking. Vanaf 0,1 mm in het uur is het regen. Het weerbeeld van nu in de tegel komt uit de metingen.',
@@ -2143,7 +2185,7 @@ function renderInfo(c) {
     '<b>Verwachting per uur</b> (neerslag, wind, bewolking): het KNMI-weermodel HARMONIE-AROME, dat elk uur opnieuw rekent op een raster van 2 bij 2 km. In een eigen verificatie tegen KNMI-metingen bleek dit model voor regen op 1 tot 2 dagen vooruit het beste van de fijnmazige modellen.',
     '<b>Temperatuur</b>: het model ICON-D2 van de Duitse weerdienst (2,2 km). In dezelfde verificatie zat HARMONIE gemiddeld een halve graad te warm en zat ICON-D2 er duidelijk dichter bij.',
     '<b>Kans op regen</b> en de <b>onzekerheidsband</b>: het ensemble ICON-D2-EPS van de Duitse weerdienst, twintig berekeningen met kleine verschillen in de beginsituatie. De kans is het aandeel berekeningen met minstens 0,1 mm in dat uur; met twintig berekeningen gaat die in stappen van 5%, dus "< 5%" betekent: geen van de twintig. De band toont waar 80% van de berekeningen zit. Bij temperatuur hoort de band bij hetzelfde model als de lijn; bij neerslag en wind komt hij voorlopig van een ander model dan de verwachting, waardoor ze elkaar soms tegenspreken.',
-    '<b>Eerstvolgende neerslag</b> volgt eerst de radar. Daarna telt een uur als nat als het KNMI-model minstens 0,5 mm geeft; de kans van het ensemble staat erbij maar beslist niet. Anders staat er "Droog", met het natste uur eronder als dat er is.',
+    '<b>Eerstvolgende neerslag</b> volgt eerst de radar. Daarna telt een uur als nat als het KNMI-model minstens 0,5 mm geeft; de kans van het ensemble staat erbij maar beslist niet. Anders staat er "Droog" met hoe lang (zo ver als radar en model kijken), en het natste uur eronder als dat er is. Is de radar droog, dan toont de kaart Komende 2 uur één regel in plaats van een lege grafiek.',
     '<b>Zonder verbinding</b> toont de app de laatst opgehaalde gegevens met het tijdstip waarop ze zijn opgehaald. Radar van meer dan een half uur oud, radar die al voorbij is en metingen van meer dan een uur oud worden dan niet meer getoond.',
     'Modeldata loopt via <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a>. Zonsopkomst, schemer en zonshoogte worden in de app zelf berekend.',
   ]);
@@ -2235,11 +2277,17 @@ function renderWind(c) {
 }
 
 /* ---------------- Bewolking ---------------- */
+/* "62% bedekt · laag 40% · hoog 30%": a layer only when it has cloud (four times 0% said nothing, UX-audit D) */
+function cloudHint(r) {
+  const layers = [['laag', r.cloud_cover_low], ['midden', r.cloud_cover_mid], ['hoog', r.cloud_cover_high]]
+    .filter(([, v]) => v > 0).map(([k, v]) => `${k} ${v}%`);
+  return [`${r.cloud_cover}% bedekt`, ...layers].join(' · ');
+}
 function renderCloud(c) {
   const H = needHarmonie(c); if (!H) return;
   const r0 = H.instant[0];
   heroBlock(c, '<svg class="ico-big" viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 10h.5a4 4 0 0 1 0 8H7z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
-    `Nu · ${fmtTime(r0.t)}`, cloudWord(r0.cloud_cover), `${r0.cloud_cover}% bedekt · laag ${r0.cloud_cover_low}% · midden ${r0.cloud_cover_mid}% · hoog ${r0.cloud_cover_high}%`);
+    `Nu · ${fmtTime(r0.t)}`, cloudWord(r0.cloud_cover), cloudHint(r0));
 
   const k1 = card(spanTitle(), []);
   c.appendChild(k1.el);
@@ -2723,6 +2771,37 @@ function runTests() {
       eq(document.querySelector('.tab[aria-pressed="true"]').dataset.tab, 'overview', 'tab Overzicht gemarkeerd');
       ok($('content').querySelector('.back-link'), 'terugknop'); ok(!document.querySelector('.tab[data-tab="rain"]'), 'geen Regen-tab meer');
     } finally { state.forecast = saved.f; state.obs = saved.o; state.ens = saved.e; state.ecmwf = saved.c; state.nowcast = saved.n; state.tab = saved.t; render(); }
+  });
+  test('v21: droog zegt hoe lang, zonder lege mini-radar; Regen-pagina zonder lege grafiek', () => {
+    const t = new Date(2026, 10, 7, 12, 0);
+    eq(dryFor(new Date(t.getTime() + 48 * HOUR), t), 'de komende 2 dagen');
+    eq(dryFor(new Date(t.getTime() + 30 * HOUR), t), 'de komende 30 uur');
+    eq(dryFor(new Date(t.getTime() + 115 * 60e3), t), 'de komende 2 uur');
+    eq(dryFor(new Date(t.getTime() + 60 * 60e3), t), `tot ${fmtTime(new Date(t.getTime() + HOUR))}`);
+    const saved = { f: state.forecast, e: state.ens, n: state.nowcast, er: state.errors };
+    try {
+      const t0 = new Date(); t0.setSeconds(0, 0); t0.setMinutes(t0.getMinutes() - (t0.getMinutes() % 5));
+      state.forecast = null; state.ens = null; state.errors = {};
+      state.nowcast = Array.from({ length: 24 }, (_, i) => ({ t: new Date(t0.getTime() + i * MIN5), v: 0 }));
+      const row = rainRow();
+      eq(row.querySelector('.rt').textContent, 'Droog de komende 2 uur'); ok(!row.querySelector('.spark'), 'geen lege mini-radar');
+      const host = h('div'); renderRain(host);
+      ok(host.querySelector('.quiet-line'), 'één regel in plaats van een lege grafiek'); ok(!host.querySelector('.card').querySelector('.chart, .icon-btn'), 'geen assen, geen tabelknop');
+      eq(host.querySelector('.hero .big').textContent, 'Droog'); eq(host.querySelector('.hero .sub').textContent, 'de komende 2 uur');
+    } finally { state.forecast = saved.f; state.ens = saved.e; state.nowcast = saved.n; state.errors = saved.er; }
+  });
+  test('v21: bewolking noemt alleen lagen met wolken; fout in mensentaal, code onder Info', () => {
+    eq(cloudHint({ cloud_cover: 0, cloud_cover_low: 0, cloud_cover_mid: 0, cloud_cover_high: 0 }), '0% bedekt');
+    eq(cloudHint({ cloud_cover: 62, cloud_cover_low: 40, cloud_cover_mid: 0, cloud_cover_high: 30 }), '62% bedekt · laag 40% · hoog 30%');
+    const es = errorState();
+    ok(!es.textContent.includes('HTTP'), 'geen technische code'); ok(es.querySelector('button'), 'knop opnieuw proberen');
+    const saved = state.errors;
+    try {
+      state.errors = { forecast: 'HTTP 503', nowcast: 'verouderd' };
+      const p = h('div'); errorNote(p, 'forecast', 'Modelverwachting'); eq(p.textContent, 'Modelverwachting is nu niet bereikbaar.');
+      const q = h('div'); errorNote(q, 'nowcast', 'Radar'); eq(q.textContent, 'Geen actuele radar.');
+      const info = h('div'); renderInfo(info); ok(info.textContent.includes('verwachting: HTTP 503'), 'code onder Info');
+    } finally { state.errors = saved; }
   });
   test('overzicht: tik op een HARMONIE-dag opent Per uur voor die dag, zonder zoom; ECMWF-dagen niet', () => {
     const saved = { f: state.forecast, o: state.obs, e: state.ens, c: state.ecmwf, t: state.tab, d: state.day };

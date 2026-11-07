@@ -207,3 +207,15 @@ Eerste ronde verbeteringen na de audit van 1 november 2026.
 - **ECMWF:** haalt nu ook `cloud_cover_low`, `_mid` en `_high` per lid op (de bewaarde kopie groeit naar ongeveer 390 kB).
 - **Grenzen 0,60 en 0,85 zijn een eerste schatting** op basis van 2–5 nov. Ze worden de week van 6 nov dagelijks getoetst tegen satellietstraling (Open-Meteo, EUMETSAT) en de uurwaarnemingen van Schiphol (KNMI: bewolking in achtsten, zonneschijnduur, straling); het logboek staat in `verificatie/iconen.md`.
 - Zelftests: 75 (nieuw: de regel zelf en het nieuwe icoon; de HARMONIE-uurtest en de mediaantest herschreven voor vijf soorten).
+
+## Versie 21: snelle winst uit de UX-audit (stap 1, "v20" in het stappenplan van de audit)
+
+Uitgevoerd op de branch `ux/v20-snelle-winst`, om eerst lokaal te proberen. De audit (5 november, op v19) noemde deze stap v20; die versie was intussen al de icoontjes, dus dit is cache v21.
+
+- **Contrast (B5):** `--label-3` licht #6e6e73 (5,1:1 op de kaart, was 3,3:1), donker #8e8e94 (5,2:1, was 3,4:1); `--label-2` donker #b0b0b8. De bedieningskleur `--tint` licht #226dc9 (5,1:1 op wit, was 4,4:1); de datakleur `--s1` blijft #2a78d6.
+- **Tikdoelen en focus (B5):** locatieknop, info-knop, tabelknop, terugknop, "Gereed" en de segmenten krijgen een onzichtbaar tikvlak van minstens 44 × 44 px (`--hit`), zonder dat de opmaak verschuift. Eén focusring (`--focus-ring`) voor alles wat bedienbaar is, ook het zoekveld.
+- **Regenbalk (B3):** droog is één rustige regel die zegt hoe lang ("Droog de komende 2 dagen", "… 2 uur" met alleen radar), zonder lege mini-radar. Komt er regen, dan verandert de balk van vorm: blauwe band, vette tekst en de mini-radar als de radar iets ziet. "De komende …" en niet "tot …": waar radar of model ophoudt te kijken, begint geen regen.
+- **Regen-pagina (B7):** de boodschap groot ("Droog" met "de komende 2 dagen" eronder op 20 px), de hint kort ("hooguit 0,2 mm, zo 18:00–19:00"). Is de radar droog, dan toont Komende 2 uur één regel ("Droog volgens de radar · 22:18") in plaats van een leeg assenstelsel, en geen tabelknop; de grafiek komt terug zodra er een staaf te tekenen is.
+- **Bewolking:** de hint noemt alleen lagen met wolken ("0% bedekt" in plaats van vier keer 0%).
+- **Foutmelding in mensentaal:** zonder gegevens "De verwachting kon niet worden opgehaald. Controleer je verbinding en probeer het opnieuw." met een knop. Ook per kaart geen codes meer ("Radar is nu niet bereikbaar.", "Geen actuele radar."). De technische reden (HTTP 503 …) staat onder Info, in "Wat er niet lukte"; Info is daarvoor ook bereikbaar als er helemaal geen gegevens zijn.
+- Zelftests: 77 (nieuw: hoe lang droog, regenbalk en Regen-pagina in droge staat, bewolkingshint, foutmelding en Info).

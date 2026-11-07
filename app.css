@@ -6,11 +6,11 @@
   --card: #ffffff;
   --label: #000000;
   --label-2: #5f5f66;
-  --label-3: #8e8e93;
+  --label-3: #6e6e73;  /* 5,1:1 op de kaart, 4,5:1 op de achtergrond (was #8e8e93: 3,3:1) */
   --separator: #e3e3e8;
   --grid: #ededf1;
-  --tint: #2a78d6;
-  --tint-wash: rgba(42, 120, 214, 0.10);
+  --tint: #226dc9;     /* bediening: 5,1:1 op wit (was #2a78d6 = --s1: 4,4:1) */
+  --tint-wash: rgba(34, 109, 201, 0.10);
   --s1: #2a78d6;   /* HARMONIE */
   --s2: #eb6834;   /* ICON-D2 */
   --s3: #1baf7a;   /* AROME */
@@ -31,6 +31,10 @@
   --cloud-lo: #c6c8ce;   /* clear */
   --cloud-mid: #8e9097;
   --cloud-hi: #4a4b51;   /* overcast */
+  --rain-wash: rgba(42, 120, 214, 0.10); /* the rain bar when rain is coming */
+  /* not themed: one focus ring and one minimum tap target for every control (UX-audit B5) */
+  --focus-ring: 2px solid var(--tint);
+  --hit: 44px;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -39,12 +43,13 @@
     --bg-outer: #0c0c0e;
     --card: #1c1c1e;
     --label: #ffffff;
-    --label-2: #a1a1a8;
-    --label-3: #6f6f76;
+    --label-2: #b0b0b8;
+    --label-3: #8e8e94;
     --separator: #2c2c2e;
     --grid: #2a2a2d;
     --tint: #3987e5;
     --tint-wash: rgba(57, 135, 229, 0.16);
+    --rain-wash: rgba(57, 135, 229, 0.18);
     --s1: #3987e5;
     --s2: #d95926;
     --s3: #199e70;
@@ -73,12 +78,13 @@
   --bg-outer: #0c0c0e;
   --card: #1c1c1e;
   --label: #ffffff;
-  --label-2: #a1a1a8;
-  --label-3: #6f6f76;
+  --label-2: #b0b0b8;
+  --label-3: #8e8e94;  /* 5,2:1 op de kaart (was #6f6f76: 3,4:1) */
   --separator: #2c2c2e;
   --grid: #2a2a2d;
   --tint: #3987e5;
   --tint-wash: rgba(57, 135, 229, 0.16);
+  --rain-wash: rgba(57, 135, 229, 0.18);
   --s1: #3987e5;
   --s2: #d95926;
   --s3: #199e70;
@@ -116,6 +122,16 @@ body {
 button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
 a { color: var(--label-2); }
 .ico { width: 18px; height: 18px; fill: currentColor; flex: none; }
+/* one focus ring for every control (rows inside a card draw it inset, see .rain-row) */
+:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
+/* small controls keep their look but get a 44 px tap target: an invisible ::before around them, so the layout
+   (and one screen per tab) stays as it is */
+.loc-pill, .info-btn, .icon-btn, .back-link, .text-btn, .segmented button { position: relative; }
+.loc-pill::before, .info-btn::before, .icon-btn::before, .back-link::before, .text-btn::before, .segmented button::before {
+  content: ""; position: absolute; left: 50%; top: 50%;
+  width: max(100%, var(--hit)); height: max(100%, var(--hit)); transform: translate(-50%, -50%);
+}
+.segmented button::before { width: 100%; } /* side by side: grow up and down only */
 
 /* ---------- phone shell ---------- */
 .phone {
@@ -262,6 +278,7 @@ h1 { font-size: 34px; font-weight: 700; letter-spacing: -0.02em; margin: 2px 0 0
 .hero { background: var(--card); border-radius: 18px; padding: 14px; margin-top: 14px; display: flex; align-items: center; gap: 12px; }
 .hero .big { font-size: 30px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; }
 .hero .l { font-size: 13px; color: var(--label-2); }
+.hero .sub { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.2; margin-top: 2px; }
 .hero .h { font-size: 13px; color: var(--label-3); margin-top: 2px; }
 .hero .ico-big { width: 36px; height: 36px; color: var(--tint); flex: none; }
 
@@ -291,18 +308,20 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 /* ---------- week ---------- */
 .card.hours { padding: 4px 0 8px; overflow: hidden; }
 .hour-strip:active { opacity: 0.75; }
-.hour-strip:focus-visible, .rain-row:focus-visible { outline: 2px solid var(--tint); outline-offset: -2px; border-radius: 10px; }
+.hour-strip:focus-visible, .rain-row:focus-visible { outline: var(--focus-ring); outline-offset: -2px; border-radius: 10px; }
+/* Rain bar. Dry (most of the time): one quiet line that says how long it stays dry, no empty mini radar.
+   Wet: it changes shape, not only colour: a blue band, bold text and the mini radar. (UX-audit B3) */
 .rain-row {
-  display: flex; align-items: center; gap: 6px; width: 100%; padding: 6px 12px 7px 14px;
-  border-bottom: 1px solid var(--separator); font-size: 15px; font-weight: 500; color: var(--label-2); text-align: left;
+  display: flex; align-items: center; gap: 6px; width: 100%; min-height: 32px; padding: 6px 12px 7px 14px;
+  border-bottom: 1px solid var(--separator); font-size: 15px; font-weight: 400; color: var(--label); text-align: left;
 }
 .rain-row:active { background: var(--tint-wash); }
 .rain-row .drop { width: 9px; height: 11px; fill: var(--label-3); flex: none; }
+.rain-row.wet { background: var(--rain-wash); font-weight: 600; }
 .rain-row.wet .drop { fill: var(--s1); }
-.rain-row.wet .rt { color: var(--label); }
 .rain-row .rt { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rain-row .spark { width: 96px; height: 16px; flex: none; }
-.rain-row .spark .base { stroke: var(--separator); stroke-width: 1; }
+.rain-row .spark .base { stroke: var(--s1); stroke-opacity: 0.35; stroke-width: 1; }
 .rain-row .spark rect { fill: var(--s1); }
 .rain-row .chev { width: 16px; height: 16px; color: var(--label-3); flex: none; }
 .back-link {
@@ -326,7 +345,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .week-row:first-child { border-top: 0; }
 .week-row.open { cursor: pointer; }
 .week-row.open:active { background: var(--tint-wash); }
-.week-row.open:focus-visible { outline: 2px solid var(--tint); outline-offset: -2px; border-radius: 10px; }
+.week-row.open:focus-visible { outline: var(--focus-ring); outline-offset: -2px; border-radius: 10px; }
 .week-row .d { font-weight: 500; }
 .week-row .ic { display: flex; flex-direction: column; align-items: center; }
 .week-row .ic .wicon-big { width: 30px; height: 30px; overflow: visible; }
@@ -357,6 +376,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   color: var(--label-3);
 }
 .search-field input { flex: 1; border: 0; background: transparent; font: inherit; color: var(--label); outline: none; min-width: 0; }
+.search-field:focus-within { outline: var(--focus-ring); outline-offset: 2px; }
 .list { list-style: none; margin: 0; padding: 0; overflow-y: auto; }
 .list button { display: block; width: 100%; text-align: left; padding: 10px 4px; border-bottom: 1px solid var(--separator); }
 .list button:active { background: var(--tint-wash); }
@@ -453,3 +473,19 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .card.info a { color: var(--tint); }
 .card.info table.bft { margin-top: 4px; }
 .card.info table.bft td { font-size: 13px; vertical-align: top; }
+
+/* ---------- quiet states (UX-audit B7, error in plain words) ---------- */
+/* a dry radar card: one line instead of an empty set of axes */
+.quiet-line { display: flex; align-items: center; gap: 8px; font-size: 15px; color: var(--label); margin: 0; padding: 0 0 6px; }
+.quiet-line .drop { width: 9px; height: 11px; fill: var(--label-3); flex: none; }
+.quiet-line .when { color: var(--label-2); }
+/* no data at all: a sentence and a button; the technical reason sits under Info */
+.error-state { text-align: center; padding: 36px 12px; }
+.error-state p { margin: 0 0 4px; font-size: 17px; font-weight: 600; }
+.error-state p.h { font-size: 15px; font-weight: 400; color: var(--label-2); margin-bottom: 16px; }
+.error-state button {
+  min-height: var(--hit); padding: 0 20px; border-radius: 999px;
+  background: var(--tint); color: #fff; font-size: 17px; font-weight: 600;
+}
+.error-state button:disabled { opacity: 0.6; }
+.card.info p.err { color: var(--label-2); font-size: 13px; font-variant-numeric: tabular-nums; }
