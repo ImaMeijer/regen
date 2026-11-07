@@ -261,3 +261,15 @@ Op `ux/v20-snelle-winst`, na het mergen van main (de terug-stapel en het terugve
 - Op verzoek van Ima: de pijltjes rechts van de dagrijen zijn weer weg (de temperatuurbalk heeft zijn breedte terug). De hint aan de rechterrand van de uurstrook blijft.
 - De regel "Lijn: de middelste van 51 ECMWF-berekeningen · band: 90% ervan" boven de grafiek van een ECMWF-dag is weg; de uitleg staat onder Info. Daarmee passen alle dagpagina's op één iPhone-scherm (nagemeten met de marges van statusbalk en thuisbalk, ook als het weerbeeld over twee regels breekt).
 - Regen past niet op één scherm zodra er regen in de komende 2 uur is (dan staat de radargrafiek erbij); dat blijft zo, op aanwijzing van Ima.
+
+## Versie 24: ontwerptokens en Info als vragen (UX-audit stap 4, "v23" in het stappenplan)
+
+Op `ux/v20-snelle-winst`. Keuzes van Ima: Info als inklapbare vragen met de bestaande tekst; 12 px tussen alle kaarten; het grote getal van een tegel 28 px vet.
+
+- **Letterschaal (B6, E):** acht maten als tokens, naar de iOS-tekststijlen: `--t-caption` 11, `--t-foot` 13, `--t-sub` 15, `--t-body` 17, `--t-title3` 20, `--t-title1` 28, `--t-large` 34 en `--t-now` 48 (de temperatuur van nu). Weg zijn 14, 12, 11,5, 10,5 en 30: 14 werd 15 (meldingen, tooltip), 12 werd 13 (voetregels, daglabels, tooltipkop, zon op/onder), 11,5 en 10,5 werden 11 (tablabels, grafiekwaarden), 30 werd 28 (het grote getal op Temperatuur, Wind, Bewolking, Regen en de dagpagina's). Alleen het kompas in de boom houdt 7 (SVG-eenheden).
+- **Hoekstralen:** `--r-chip` 8 (tooltip, segmenten), `--r-inner` 12 (velden, meldingen, rijen), `--r-card` 18 (kaarten, tegels, het blad), `--r-pill` 999. Datatekens (staven, legenda, de grijper) houden hun 2–3 px; het telefoonraam op desktop houdt 44.
+- **Afstanden:** 4-pt-raster `--sp-1` t/m `--sp-6`; `--gap-card` 12 tussen alle kaarten (was 14, op Overzicht al 12); kaarten en tegels hebben 12 px binnenrand (was 14, onder 10 → 8), ook de kaart van nu en de regenregel.
+- **Beweging:** `--dur-fast` 150 ms, `--dur-page` 220 ms, `--ease`; het blad, de veeg en trekken-om-te-verversen gebruiken ze, `MOTION` in app.js houdt dezelfde waarden.
+- **Info (B8):** veertien korte vragen (`<details>`, dicht bij openen, werkt met toetsenbord en schermlezer zonder script), met de bestaande tekst als antwoord; daaronder een brontabel (wat · bron · hoe vaak nieuw) met de licenties in één regel, de Beaufort-tabel en de privacyzin. Een eventuele foutkaart ("Wat er niet lukte") blijft bovenaan. Info is ongeveer 3250 px korter.
+- **Controle:** alle pagina's nagemeten op 393 × 852 met de marges van statusbalk en thuisbalk, voor en na: Overzicht, Per uur, alle zeven dagen, Temperatuur, Wind en Bewolking passen op één scherm; Regen loopt 20 px minder over (114 in plaats van 134, met regen in de komende 2 uur). Alle zichtbare tekst gebruikt een maat uit de schaal.
+- Cache v24. Zelftests: 85 (nieuw: Info als vragen met alle tekst, brontabel en Beaufort; tokens voor tablabel, kaartafstand, kaarthoek en het grote getal, en geen lettergrootte buiten de schaal).

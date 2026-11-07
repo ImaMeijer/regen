@@ -2275,7 +2275,7 @@ function renderInfo(c) {
       (state.updated ? `<br>laatste poging ${fmtTime(state.updated)}` : '')]);
     c.lastChild.querySelector('p').className = 'err';
   }
-  sec('Wat je ziet', [
+  const SEE = [
     'De app toont de verwachting voor de gekozen plaats. <b>Overzicht</b> draagt de naam van de plaats (tik erop om een andere te kiezen) en begint met het weer van nu: de temperatuur, het weerbeeld, hoe koud het voelt en de laagste en hoogste temperatuur van vandaag. Daaronder de regenregel: hoe lang het droog blijft, of wanneer het gaat regenen; komt er regen aan, dan kleurt de regel blauw met een mini-radar per 5 minuten. Daaronder het weer per uur en de komende zeven dagen, met per dag het weerbeeld, de laagste en hoogste temperatuur en de kans op regen. Tik op de regenbalk voor <b>Regen</b> (de radar voor de komende 2 uur en de neerslag per uur met de kans op regen) en op de uurstrook voor <b>Per uur</b>, dat temperatuur en weerbeeld per uur naast elkaar zet. Tik op een dag in de lijst voor dezelfde pagina voor alleen die dag (vandaag de hele dag vanaf middernacht, met een stippellijn op nu; de uren daarvoor zijn wat het model verwachtte, geen metingen); voor de dagen na morgen komt die uit het ECMWF-ensemble: de lijn is de middelste van de 51 berekeningen en de band laat zien waar 90% van de berekeningen zit (de 5% hoogste en de 5% laagste vallen erbuiten, zoals de lichte band van de KNMI-pluim), voor temperatuur én regen; bij regen noemt de tooltip die band gewoon als "0,0 tot 0,4 mm", omdat de middelste waarde bij buien bijna altijd 0 is, en de boompjes tonen de wind van de middelste berekening; "‹ Overzicht" linksboven brengt je terug. Trek een pagina bovenaan omlaag om te verversen. <b>Temperatuur</b>, <b>Wind</b> en <b>Bewolking</b> tonen elk hun eigen verloop.',
     'Zoomen: spreid twee vingers op een grafiek om in te zoomen, knijp ze samen om weer verder vooruit te kijken (tot 48 uur). De grafiek begint altijd bij nu; de titel van de kaart toont hoeveel uur je ziet en de keuze wordt onthouden. Sleep met één vinger over een grafiek om de waarden van dat moment te zien; de stippellijn volgt je vinger.',
     'De achtergrond van elke grafiek volgt de zon: warm bij daglicht, grijzer naarmate er meer bewolking is, donker in de nacht, met schemer ertussen. De zonnetjes boven de grafiek staan op zonsopkomst en -ondergang en tonen het weerbeeld van dat moment.',
@@ -2283,8 +2283,8 @@ function renderInfo(c) {
     'Bovenaan <b>Overzicht</b> staat het weer per uur, zo ver als ICON-D2 vooruit rekent (tot 48 uur): het icoontje met dezelfde regels als de uurrij op Per uur en de temperatuur van ICON-D2. Nu komt, net als de kaart van nu, uit de metingen; om middernacht staat de naam van de nieuwe dag, en zonsopkomst en -ondergang staan als eigen vakje tussen de uren. Schemer staat op Per uur en de dagpagina\'s. Veeg opzij voor de volgende uren; tik erop voor Per uur.',
     'Het <b>weerbeeld van een dag</b> in Overzicht kijkt alleen naar de uren dat het licht is. Elk licht uur krijgt zijn eigen icoontje, met dezelfde regels als de uurrij op Per uur, en de dag krijgt het middelste daarvan (de mediaan). Een strak blauwe dag die in de laatste twee lichte uren dichttrekt, blijft zo een zonnige dag. Laagste en hoogste temperatuur gaan over de hele dag. Het getal met de druppel onder het icoontje is de kans op een natte dag: het deel van de ensembleberekeningen met minstens 0,5 mm in de lichte uren van die dag, getoond vanaf 10%; regen in de nacht telt niet mee, net als bij het icoontje. De balk loopt van laagste naar hoogste temperatuur op de schaal van alle dagen samen; de stip is de temperatuur van nu.',
     'De dagen in Overzicht gebruiken zolang het kan dezelfde modellen als de rest van de app: HARMONIE voor het weerbeeld, ICON-D2 voor de temperatuur en het ICON-D2-ensemble voor de kans, meestal vandaag en morgen. Voor de dagen daarna komt alles uit het <b>ECMWF-ensemble</b>, dat ook achter de pluim van het KNMI zit: 51 berekeningen op een raster van 25 km. Elke berekening krijgt zijn eigen dag met dezelfde regels; de dag krijgt het middelste icoontje van de 51 en de middelste laagste en hoogste temperatuur, zoals de pluim. Het vage deel van de balk is waar de middelste helft van de berekeningen zit; hoe breder, hoe onzekerder.',
-  ]);
-  sec('Waar de cijfers vandaan komen', [
+  ];
+  const SRC = [
     '<b>Nu-waarden</b> (temperatuur, wind) zijn echte metingen van het dichtstbijzijnde KNMI-weerstation, elke 10 minuten bijgewerkt, via de feed van Buienradar. De tegel noemt het station en de afstand.',
     'Het <b>weerbeeld van nu</b> in de tegel komt ook uit metingen: overdag uit hoeveel zon de KNMI-stations binnen 40 km de afgelopen 10 minuten kregen, vergeleken met een heldere hemel, waarbij dichterbij zwaarder telt. Eén wolkje boven één station maakt het dan nog niet bewolkt. Bij lage zon en \'s nachts telt de omschrijving van het dichtstbijzijnde station, en zonder meting het model.',
     '<b>Radar</b> voor de komende 2 uur: Buienradar-nowcast, een verplaatsing van het actuele radarbeeld.',
@@ -2294,19 +2294,69 @@ function renderInfo(c) {
     '<b>Eerstvolgende neerslag</b> volgt eerst de radar. Daarna telt een uur als nat als het KNMI-model minstens 0,5 mm geeft; de kans van het ensemble staat erbij maar beslist niet. Anders staat er "Droog" met hoe lang (zo ver als radar en model kijken), en het natste uur eronder als dat er is. Is de radar droog, dan toont de kaart Komende 2 uur één regel in plaats van een lege grafiek.',
     '<b>Zonder verbinding</b> toont de app de laatst opgehaalde gegevens met het tijdstip waarop ze zijn opgehaald. Radar van meer dan een half uur oud, radar die al voorbij is en metingen van meer dan een uur oud worden dan niet meer getoond.',
     'Modeldata loopt via <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a>. Zonsopkomst, schemer en zonshoogte worden in de app zelf berekend.',
-  ]);
-  sec('Hoe je de grafieken leest', [
+  ];
+  const READ = [
     'Een <b>neerslagstaaf</b> is de som over dat uur; de radarstaven zijn de intensiteit op dat moment, in millimeter per uur. De uren die de radar dekt (ongeveer de eerste twee) komen ook in de uurgrafiek uit de radar, zodat beide grafieken hetzelfde zeggen; voor die uren staat er geen kans. Van het lopende uur telt alleen wat nog komt. Lichte regen is 0,1 tot 1 mm per uur, matige regen 1 tot 4, zware regen meer dan 4.',
     '<b>Windpijlen</b> (elke 3 uur) wijzen waarheen de wind waait; in de tekst staat waar de wind vandaan komt, zoals gebruikelijk. Beaufort volgt uit de uursnelheid volgens de KNMI-tabel; de boom laat zien wat die kracht met een boom doet.',
     '<b>Bewolking</b> is het deel van de hemel dat bedekt is. De lijn wordt donkerder grijs naarmate er meer bewolking is. Het model geeft per uur een momentopname van één vakje van 2 km, die bij losse wolken tussen 0 en 100% springt; de app middelt daarom elk uur met het uur ervoor en erna.',
-  ]);
+  ];
+  // UX-audit B8: the same text, behind short questions that each open on a tap (native <details>, so it works
+  // with the keyboard and a screen reader without any script); then the sources as a table and Beaufort
+  const QUESTIONS = [
+    ['Wat zie ik op Overzicht en de pagina’s eronder?', [SEE[0]]],
+    ['Wat staat er in de uurstrook?', [SEE[4]]],
+    ['Hoe komt een uur aan zijn icoontje?', [SEE[3]]],
+    ['Hoe komt een dag aan zijn icoontje en kans op regen?', [SEE[5]]],
+    ['Welke modellen zitten achter de zeven dagen?', [SEE[6]]],
+    ['Hoe beslist de app of en wanneer het gaat regenen?', [SRC[6]]],
+    ['Wat is de kans op regen, en wat is de band in de grafiek?', [SRC[5]]],
+    ['Waar komen de waarden van nu vandaan?', [SRC[0], SRC[1]]],
+    ['Waarom twee modellen voor de verwachting?', [SRC[3], SRC[4], SRC[2], SRC[8]]],
+    ['Hoe zoom ik, en wat betekent de kleur achter een grafiek?', [SEE[1], SEE[2]]],
+    ['Wat betekent een neerslagstaaf?', [READ[0]]],
+    ['Hoe lees ik de wind en de boom?', [READ[1]]],
+    ['Wat betekent bewolking in procenten?', [READ[2]]],
+    ['Wat gebeurt er zonder verbinding?', [SRC[7]]],
+  ];
+  const faq = h('section', 'card info faq');
+  faq.appendChild(h('h2', null, 'Vragen'));
+  for (const [q, paras] of QUESTIONS) {
+    const d = h('details');
+    const s = h('summary');
+    s.appendChild(h('span', null, q));
+    s.insertAdjacentHTML('beforeend', '<svg class="chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7.5 4.5L13 10l-5.5 5.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>');
+    d.appendChild(s);
+    for (const p of paras) { const el = h('p'); el.innerHTML = p; d.appendChild(el); }
+    faq.appendChild(d);
+  }
+  c.appendChild(faq);
+
+  // the sources at a glance; the licences in one line under it
+  const src = h('section', 'card info');
+  src.appendChild(h('h2', null, 'Bronnen'));
+  const SOURCES = [
+    ['Metingen van nu', 'KNMI-stations, via Buienradar', 'elke 10 min'],
+    ['Radar, 2 uur', 'Buienradar-nowcast', 'elke 5 min'],
+    ['Verwachting per uur', 'KNMI HARMONIE-AROME, 2 km', 'elk uur'],
+    ['Temperatuur', 'DWD ICON-D2, 2,2 km', 'elke 3 uur'],
+    ['Kans en band', 'DWD ICON-D2-EPS, 20 berekeningen', 'elke 3 uur'],
+    ['Dag 3 tot 7', 'ECMWF-ensemble, 51 berekeningen, 25 km', 'elke 6 uur'],
+  ];
+  const t = h('table', 'src');
+  const head = t.createTHead().insertRow();
+  for (const k of ['Wat', 'Bron', 'Nieuw']) head.appendChild(h('th', null, k));
+  const body = t.createTBody();
+  for (const row of SOURCES) { const r = body.insertRow(); for (const v of row) r.insertCell().textContent = v; }
+  src.appendChild(t);
+  const lic = h('p', 'foot');
+  lic.innerHTML = 'Modellen via <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a> (CC BY 4.0, voorwaarden voor niet-commercieel gebruik); radar en metingen van <a href="https://www.buienradar.nl" target="_blank" rel="noopener">Buienradar.nl</a>. Zon en schemer rekent de app zelf uit.';
+  src.appendChild(lic);
+  c.appendChild(src);
+
   sec('Beaufort volgens KNMI', [
     '<table class="bft">' + BEAUFORT.map((b, i) => `<tr><td class="num">${i}</td><td>${b[0]}</td><td>${b[1]}</td></tr>`).join('') + '</table>',
   ]);
-  sec('Bronnen en licenties', [
-    'Verwachting: KNMI, via Open-Meteo (CC BY 4.0). Temperatuur: DWD ICON-D2, via Open-Meteo (CC BY 4.0). Ensemble: DWD ICON-D2-EPS, via Open-Meteo (CC BY 4.0). Meerdaagse verwachting: ECMWF-ensemble (IFS ENS), via Open-Meteo (CC BY 4.0). Radar en stationsmetingen: <a href="https://www.buienradar.nl" target="_blank" rel="noopener">Buienradar.nl</a>. Open-Meteo wordt gebruikt onder de voorwaarden voor niet-commercieel gebruik.',
-    'Deze app is een privéprototype. Instellingen zoals plaats en zoom, en de laatst opgehaalde weergegevens, blijven op je eigen telefoon; er worden geen gegevens verzameld.',
-  ]);
+  c.appendChild(h('p', 'info-foot', 'Deze app is een privéprototype. Instellingen zoals plaats en zoom, en de laatst opgehaalde weergegevens, blijven op je eigen telefoon; er worden geen gegevens verzameld.'));
 }
 
 /* ---------------- Temperatuur ---------------- */
@@ -2444,7 +2494,7 @@ function popTo(depth) {
 /* Transitions (UX-audit B4, B10): a page that opens slides in from the right, going back it comes from the
    left, a tab fades in. Short and small (36 px), header and content together; nothing under reduced motion,
    and nothing after the edge swipe, which has already moved the page with the finger. */
-const MOTION = { page: 220, fast: 150, ease: 'cubic-bezier(.2,.8,.2,1)', quiet: false };
+const MOTION = { page: 220, fast: 150, ease: 'cubic-bezier(.2,.8,.2,1)', quiet: false }; // = --dur-page, --dur-fast and --ease in app.css
 function pageAnim(kind) {
   if (MOTION.quiet) { MOTION.quiet = false; return; }
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
@@ -3555,6 +3605,35 @@ function runTests() {
       const spacer = h('div'); spacer.style.height = '3000px'; s.appendChild(spacer);
       try { scrollJump(200); ok(!ptrStart(100, 200), 'niet als de pagina naar beneden gescrold is'); } finally { spacer.remove(); toTop(); }
     } finally { ptr.reload = savedReload; ptr.busy = false; ptr.on = false; ptr.engaged = false; ptrHide(); }
+  });
+  test('v24: Info als vragen die dicht beginnen, met alle tekst; brontabel; Beaufort', () => {
+    const saved = state.errors;
+    try {
+      state.errors = {};
+      const host = h('div'); renderInfo(host);
+      const qs = host.querySelectorAll('.faq details');
+      eq(qs.length, 14, 'veertien vragen'); ok([...qs].every(d => !d.open), 'alle vragen dicht');
+      for (const d of qs) ok(d.querySelector('summary').textContent.trim().endsWith('?'), 'een vraag: ' + d.querySelector('summary').textContent);
+      for (const words of ['HARMONIE-AROME', 'ICON-D2-EPS', 'Zonder verbinding', 'neerslagstaaf', 'Windpijlen', 'Zoomen', 'weerbeeld van een dag', 'ECMWF-ensemble'])
+        ok(host.textContent.includes(words), 'tekst behouden: ' + words);
+      eq(host.querySelectorAll('table.src tbody tr').length, 6, 'zes bronnen'); eq(host.querySelectorAll('table.bft tr').length, BEAUFORT.length);
+      ok(!host.querySelector('.card.info h2') || host.querySelector('.card.info h2').textContent !== 'Wat er niet lukte', 'geen foutkaart zonder fouten');
+    } finally { state.errors = saved; }
+  });
+  test('v24: ontwerptokens: letters, hoeken en afstanden komen uit de schaal', () => {
+    const cs = el => getComputedStyle(el);
+    eq(cs(document.querySelector('.tab')).fontSize, '11px', 'tablabel caption 2');
+    const host = $('content'), probe = h('section', 'card'); host.appendChild(probe);
+    try {
+      eq(cs(probe).marginTop, '12px', 'tussen kaarten'); eq(cs(probe).borderTopLeftRadius, '18px', 'kaarthoek');
+      const hero = h('section', 'hero'), big = h('div', 'big', '7°'); hero.appendChild(big); host.appendChild(hero);
+      eq(cs(big).fontSize, '28px', 'groot getal = title 1'); hero.remove();
+    } finally { probe.remove(); }
+    const sizes = new Set(['11px', '13px', '15px', '17px', '20px', '28px', '34px', '48px']);
+    for (const el of document.querySelectorAll('#phone *:not(svg *):not(.tests *)')) {
+      if (!el.childNodes.length || ![...el.childNodes].some(n => n.nodeType === 3 && n.textContent.trim())) continue;
+      ok(sizes.has(cs(el).fontSize), `lettergrootte buiten de schaal: ${cs(el).fontSize} op ${el.className || el.tagName}`);
+    }
   });
 
   nav.stack = []; // tests that open a page and do not come back leave it behind; the app is back on a tab
