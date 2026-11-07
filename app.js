@@ -1575,7 +1575,7 @@ function rainRow() {
     row.appendChild(svg);
   }
   row.insertAdjacentHTML('beforeend', '<svg class="chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7.5 4.5L13 10l-5.5 5.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>');
-  row.addEventListener('click', () => { state.tab = 'rain'; toTop(); render(); });
+  row.addEventListener('click', () => openPage('rain'));
   return row;
 }
 /* Hourly strip, as in Apple's app: per hour the icon by the rules of Per uur's hourly row and the temperature
@@ -1607,7 +1607,7 @@ function hourStrip() {
   }
   if (!strip.children.length) return null;
   strip.tabIndex = 0; strip.setAttribute('role', 'button');
-  const open = () => { state.tab = 'hours'; toTop(); render(); };
+  const open = () => openPage('hours');
   strip.addEventListener('click', open);
   strip.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
   return strip;
@@ -1617,7 +1617,7 @@ function backLink(c) {
   const back = h('button', 'back-link');
   back.type = 'button';
   back.innerHTML = '<svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M12.5 4.5L7 10l5.5 5.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Overzicht';
-  back.addEventListener('click', () => { state.tab = 'overview'; toTop(); render(); });
+  back.addEventListener('click', () => { if (!goBack()) { state.tab = 'overview'; toTop(); render(); } });
   c.appendChild(back);
 }
 /* The hourly page (the former Overzicht), reached from the strip. */
@@ -1635,7 +1635,7 @@ const hasDayPage = d => d.src === 'harmonie' || ensDayHours(d.day).length >= 24;
    ECMWF page for the days after. A day that has gone (past midnight) falls back to Overzicht. */
 function renderDayPage(c) {
   const d = state.day && weekDays().find(x => sameDay(x.day, state.day) && hasDayPage(x));
-  if (!d) { state.tab = 'overview'; render(); return; }
+  if (!d) { state.tab = 'overview'; resetNav(); render(); return; }
   backLink(c);
   if (d.src === 'harmonie') renderOverview(c, d); else renderEnsDay(c, d);
 }
@@ -1684,7 +1684,7 @@ function renderEnsDay(c, d) {
     { label: '°C van–tot', num: true, get: p => `${fmtNum(p.tLo, 0)}–${fmtNum(p.tHi, 0)}` }, { label: 'Weer', get: word },
     { label: 'mm', num: true, get: p => fmtNum(p.pMed, 1) }, { label: 'mm van–tot', num: true, get: p => `${fmtNum(p.pLo, 1)}–${fmtNum(p.pHi, 1)}` }]));
 }
-const openDay = d => { state.tab = 'day'; state.day = d.day; toTop(); render(); };
+const openDay = d => openPage('day', d.day);
 function renderWeek(c) {
   topCard(c);
   const days = weekDays();
@@ -2264,11 +2264,133 @@ function renderCloud(c) {
    5. UI wiring: tabs, sheet, search, geolocation
    ====================================================================== */
 // jump, not glide: .screen scrolls smoothly, and render() would put a half-finished scroll back
-const toTop = () => { const s = $('screen'); s.style.scrollBehavior = 'auto'; s.scrollTop = 0; s.style.scrollBehavior = ''; };
-$('infoBtn').addEventListener('click', () => { state.tab = 'info'; toTop(); render(); });
+const scrollJump = y => { const s = $('screen'); s.style.scrollBehavior = 'auto'; s.scrollTop = y; s.style.scrollBehavior = ''; };
+const toTop = () => scrollJump(0);
+
+/* ---- back: Per uur, Regen, a day and Info open on top of the page you came from. "‹ Overzicht", the swipe
+   from the left edge and the browser's own back (Safari's swipe, Android's back button) all return to it, at
+   the spot where you left it. A tab is a root, as in an iPhone app: the tab bar starts the stack over.
+   Every page we open also gets a browser history entry carrying its depth, so the browser's back and ours stay
+   in step: popstate only pops what the stack still holds above that depth. ---- */
+const nav = { stack: [] };
+function openPage(tab, day) {
+  nav.stack.push({ tab: state.tab, day: state.day, scroll: $('screen').scrollTop, title: $('title').textContent });
+  state.tab = tab; if (day !== undefined) state.day = day;
+  toTop(); render();
+  try { history.pushState({ regenDepth: nav.stack.length }, ''); } catch (e) {}
+}
+function popTo(depth) {
+  let prev = null;
+  while (nav.stack.length > Math.max(0, depth)) prev = nav.stack.pop();
+  if (!prev) return false;
+  state.tab = prev.tab; state.day = prev.day;
+  render(); scrollJump(prev.scroll);
+  return true;
+}
+/* our back (button, swipe): pop now, then let the browser follow; its popstate then finds nothing left to do */
+function goBack() {
+  if (!popTo(nav.stack.length - 1)) return false;
+  try { history.back(); } catch (e) {}
+  return true;
+}
+function resetNav() {
+  const n = nav.stack.length; if (!n) return;
+  nav.stack = [];
+  try { history.go(-n); } catch (e) {}
+}
+window.addEventListener('popstate', e => { popTo((e.state && e.state.regenDepth) || 0); });
+
+/* ---- swipe from the left edge = back. Only when the app runs on its own (added to the home screen): in a
+   browser tab Safari does this swipe itself, through the history entries above, and two backs would be one
+   too many. ?veeg=1 switches it on in a browser, for trying it out. ---- */
+const SWIPE_EDGE = 24; // px from the left edge of the app where the swipe may start
+const swipe = { on: false, engaged: false, x0: 0, y0: 0, t0: 0, dx: 0, w: 0 };
+const ownSwipe = navigator.standalone === true || new URLSearchParams(location.search).get('veeg') === '1';
+function swipeHint() {
+  let el = $('swipeBack');
+  if (!el) {
+    el = h('div', 'swipe-back'); el.id = 'swipeBack'; el.setAttribute('aria-hidden', 'true');
+    $('phone').insertBefore(el, $('screen')); // under the screen, which slides away from it
+  }
+  return el;
+}
+function swipeStart(x, y, t) {
+  swipe.on = false;
+  if (!nav.stack.length || !$('sheet').hidden) return false;
+  const r = $('phone').getBoundingClientRect();
+  if (x - r.left > SWIPE_EDGE || x < r.left) return false;
+  Object.assign(swipe, { on: true, engaged: false, x0: x, y0: y, t0: t, dx: 0, w: r.width });
+  return true;
+}
+/* true when this move belongs to the swipe (then the caller stops the page from scrolling) */
+function swipeMove(x, y) {
+  if (!swipe.on) return false;
+  const dx = x - swipe.x0, dy = y - swipe.y0;
+  if (!swipe.engaged) {
+    if (Math.abs(dy) > 10 && Math.abs(dy) > dx) { swipe.on = false; return false; } // scrolling, not swiping
+    if (dx < 10) return false;
+    swipe.engaged = true;
+    hideTooltip();
+    for (const hh of document.querySelectorAll('.chart')) if (hh._scrubTo) hh._scrubTo(null);
+    const hint = swipeHint();
+    hint.textContent = '';
+    hint.insertAdjacentHTML('beforeend', '<svg class="ico" viewBox="0 0 20 20"><path d="M12.5 4.5L7 10l5.5 5.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>');
+    hint.appendChild(h('span', null, nav.stack[nav.stack.length - 1].title));
+    hint.hidden = false;
+    $('screen').classList.add('swiping');
+  }
+  swipe.dx = Math.max(0, dx);
+  $('screen').style.transform = `translateX(${swipe.dx}px)`;
+  const p = Math.min(1, swipe.dx / (swipe.w * 0.4));
+  const hint = swipeHint(); hint.style.opacity = p; hint.style.transform = `translateX(${(p - 1) * 16}px)`;
+  return true;
+}
+function swipeFinish(back) {
+  const s = $('screen');
+  s.classList.remove('swiping', 'settling'); s.style.transform = '';
+  const hint = swipeHint(); hint.hidden = true; hint.style.opacity = ''; hint.style.transform = '';
+  if (back) goBack();
+}
+/* far enough (40 % of the width) or a quick flick goes back; otherwise the page slides back into place */
+function swipeEnd(t, instant) {
+  if (!swipe.on) return false;
+  const was = swipe.engaged; swipe.on = false; swipe.engaged = false;
+  if (!was) return false;
+  const back = swipe.dx > swipe.w * 0.4 || (swipe.dx > 40 && swipe.dx / Math.max(1, t - swipe.t0) > 0.5);
+  const s = $('screen');
+  if (instant || matchMedia('(prefers-reduced-motion: reduce)').matches) { swipeFinish(back); return back; }
+  s.classList.add('settling');
+  s.style.transform = back ? `translateX(${swipe.w}px)` : '';
+  const hint = swipeHint(); hint.style.opacity = back ? 1 : 0;
+  let done = false;
+  const finish = () => { if (done) return; done = true; s.removeEventListener('transitionend', finish); swipeFinish(back); };
+  s.addEventListener('transitionend', finish);
+  setTimeout(finish, 320); // in case transitionend never comes (nothing moved, tab in the background)
+  return back;
+}
+function swipeCancel() { if (swipe.on && swipe.engaged) { swipe.on = false; swipe.engaged = false; swipeFinish(false); } else swipe.on = false; }
+if (ownSwipe) {
+  const phone = $('phone');
+  phone.addEventListener('touchstart', e => {
+    if (e.touches.length !== 1) { swipeCancel(); return; }
+    swipeStart(e.touches[0].clientX, e.touches[0].clientY, e.timeStamp);
+  }, { passive: true, capture: true });
+  phone.addEventListener('touchmove', e => {
+    if (!swipe.on) return;
+    if (e.touches.length !== 1) { swipeCancel(); return; }
+    if (swipeMove(e.touches[0].clientX, e.touches[0].clientY) && e.cancelable) e.preventDefault();
+  }, { passive: false, capture: true });
+  phone.addEventListener('touchend', e => { swipeEnd(e.timeStamp); }, true);
+  phone.addEventListener('touchcancel', swipeCancel, true);
+  // the finger that swipes must not also scrub a chart it happened to start on
+  phone.addEventListener('pointermove', e => { if (swipe.engaged) e.stopPropagation(); }, true);
+}
+
+$('infoBtn').addEventListener('click', () => openPage('info'));
 for (const btn of document.querySelectorAll('.tab')) {
   btn.addEventListener('click', () => {
     if (state.tab === btn.dataset.tab) { $('screen').scrollTo({ top: 0 }); return; }
+    resetNav();
     state.tab = btn.dataset.tab;
     try { localStorage.setItem('regen.tab', state.tab); } catch (e) {}
     toTop();
@@ -2697,6 +2819,7 @@ function runTests() {
   test('overzicht: tik op de uurstrook opent Per uur; de tab Overzicht blijft gemarkeerd, terug gaat naar de dagen', () => {
     const saved = { f: state.forecast, o: state.obs, e: state.ens, c: state.ecmwf, t: state.tab };
     try {
+      state.tab = 'overview'; // the strip sits on Overzicht, so that is where back goes
       state.forecast = withDays(mkJson(), NOW, 52.37, 4.9); state.obs = null; state.ens = null; state.ecmwf = null;
       const host = h('div'); renderWeek(host);
       host.querySelector('.hour-strip').click();
@@ -2727,6 +2850,7 @@ function runTests() {
   test('overzicht: tik op een HARMONIE-dag opent Per uur voor die dag, zonder zoom; ECMWF-dagen niet', () => {
     const saved = { f: state.forecast, o: state.obs, e: state.ens, c: state.ecmwf, t: state.tab, d: state.day };
     try {
+      state.tab = 'overview';
       state.forecast = withDays(mkJson(), NOW, 52.37, 4.9); state.obs = null; state.ens = null;
       state.ecmwf = { days: [{ day: new Date(2026, 10, 2), kind: 'cloud', mn: 3, mx: 8, mnLo: 2, mxHi: 10, chance: 0.6, n: 51 }] };
       const host = h('div'); renderWeek(host);
@@ -3053,7 +3177,49 @@ function runTests() {
       toTop(); eq(s.scrollTop, 0, 'direct 0, niet halverwege een animatie');
     } finally { spacer.remove(); }
   });
+  test('terug: een dag openen en terug brengt je op Overzicht op dezelfde plek; de tabbalk begint opnieuw', () => {
+    const saved = { f: state.forecast, o: state.obs, e: state.ens, c: state.ecmwf, t: state.tab, d: state.day, n: nav.stack };
+    const s = $('screen'), spacer = h('div'); spacer.style.height = '3000px';
+    try {
+      state.forecast = withDays(mkJson(), NOW, 52.37, 4.9); state.obs = null; state.ens = null; state.ecmwf = null;
+      nav.stack = []; state.tab = 'overview'; render(); s.appendChild(spacer);
+      scrollJump(300); const at = s.scrollTop; ok(at > 0, 'uitgangspunt: naar beneden gescrold');
+      $('content').querySelectorAll('.week-row.open')[1].click();
+      eq(state.tab, 'day'); eq(nav.stack.length, 1); eq(s.scrollTop, 0, 'dag begint bovenaan');
+      $('infoBtn').click(); eq(state.tab, 'info'); eq(nav.stack.length, 2, 'Info bovenop de dag');
+      ok(goBack(), 'terug kan'); eq(state.tab, 'day', 'van Info terug naar de dag');
+      $('content').querySelector('.back-link').click(); eq(state.tab, 'overview'); eq(nav.stack.length, 0);
+      eq(s.scrollTop, at, 'terug op de plek waar je was');
+      ok(!goBack(), 'op een tab is er geen terug');
+      $('content').querySelector('.rain-row').click(); eq(state.tab, 'rain'); eq(nav.stack.length, 1);
+      document.querySelector('.tab[data-tab="wind"]').click(); eq(state.tab, 'wind'); eq(nav.stack.length, 0, 'tab = opnieuw beginnen');
+    } finally {
+      spacer.remove(); state.forecast = saved.f; state.obs = saved.o; state.ens = saved.e; state.ecmwf = saved.c; state.tab = saved.t; state.day = saved.d; nav.stack = saved.n; render();
+      try { localStorage.setItem('regen.tab', ['overview', 'temp', 'wind', 'cloud'].includes(saved.t) ? saved.t : 'overview'); } catch (e) {} // the Wind tap above saved itself
+    }
+  });
+  test('terug: vegen vanaf de linkerrand, niet vanaf het midden; kort of omhoog vegen gaat niet terug', () => {
+    const saved = { f: state.forecast, o: state.obs, e: state.ens, c: state.ecmwf, t: state.tab, d: state.day, n: nav.stack };
+    try {
+      state.forecast = withDays(mkJson(), NOW, 52.37, 4.9); state.obs = null; state.ens = null; state.ecmwf = null;
+      nav.stack = []; state.tab = 'overview'; render();
+      const r = $('phone').getBoundingClientRect(), x = r.left + 8, y = r.top + 300;
+      ok(!swipeStart(x, y, 0), 'op een tab: niets om naar terug te gaan');
+      $('content').querySelectorAll('.week-row.open')[0].click(); eq(state.tab, 'day');
+      ok(!swipeStart(r.left + 80, y, 0), 'midden van het scherm telt niet');
+      ok(swipeStart(x, y, 0)); ok(!swipeMove(x + 2, y + 30), 'omhoog/omlaag = scrollen'); ok(!swipeEnd(100, true)); eq(state.tab, 'day');
+      const start = () => { const r0 = swipeStart(x, y, 0); swipe.w = 400; return r0; }; // a 400 px wide phone, also when the page is hidden (width 0)
+      ok(start()); ok(swipeMove(x + 60, y + 4)); ok($('screen').classList.contains('swiping'));
+      eq($('swipeBack').textContent, 'Overzicht', 'zegt waar je naartoe gaat');
+      ok(!swipeEnd(1000, true), '60 px langzaam: blijft staan'); eq(state.tab, 'day'); eq($('screen').style.transform, '');
+      ok(start()); swipeMove(x + 40, y); swipeMove(x + 70, y); ok(swipeEnd(100, true), 'snelle veeg gaat terug'); eq(state.tab, 'overview');
+      $('content').querySelectorAll('.week-row.open')[0].click();
+      ok(start()); swipeMove(x + 200, y); ok(swipeEnd(2000, true), 'halverwege losgelaten gaat terug'); eq(state.tab, 'overview');
+      ok(!$('screen').classList.contains('swiping') && $('swipeBack').hidden, 'opgeruimd');
+    } finally { state.forecast = saved.f; state.obs = saved.o; state.ens = saved.e; state.ecmwf = saved.c; state.tab = saved.t; state.day = saved.d; nav.stack = saved.n; render(); }
+  });
 
+  nav.stack = []; // tests that open a page and do not come back leave it behind; the app is back on a tab
   const panel = h('div', 'tests');
   const passed = results.filter(r => r.ok).length;
   panel.appendChild(h('h2', null, `Zelftest: ${passed}/${results.length} geslaagd`));

@@ -207,3 +207,11 @@ Eerste ronde verbeteringen na de audit van 1 november 2026.
 - **ECMWF:** haalt nu ook `cloud_cover_low`, `_mid` en `_high` per lid op (de bewaarde kopie groeit naar ongeveer 390 kB).
 - **Grenzen 0,60 en 0,85 zijn een eerste schatting** op basis van 2–5 nov. Ze worden de week van 6 nov dagelijks getoetst tegen satellietstraling (Open-Meteo, EUMETSAT) en de uurwaarnemingen van Schiphol (KNMI: bewolking in achtsten, zonneschijnduur, straling); het logboek staat in `verificatie/iconen.md`.
 - Zelftests: 75 (nieuw: de regel zelf en het nieuwe icoon; de HARMONIE-uurtest en de mediaantest herschreven voor vijf soorten).
+
+## Versie 22: terug met een veeg vanaf de linkerrand
+
+- **Terug-stapel (`openPage`, `goBack`, `nav.stack`):** Per uur, Regen, een dag en Info openen bovenop de pagina waar je vandaan kwam. "‹ Overzicht", de veeg en de terugknop van de browser brengen je terug naar die pagina, op de plek waar je was (Info vanaf een dag gaat dus terug naar die dag). Een tab is een beginpunt, zoals in een iPhone-app: de tabbalk begint de stapel opnieuw en op een tab is er geen terug.
+- **Browsergeschiedenis:** elke geopende pagina krijgt een eigen geschiedenisregel met haar diepte. Daardoor werken ook de eigen veeg van Safari (als de app in de browser openstaat) en de terugknop van Android; `popstate` haalt alleen weg wat er boven die diepte nog op de stapel ligt, zodat onze terug en die van de browser niet dubbel tellen.
+- **Vegen vanaf de linkerrand** (binnen 24 px, `SWIPE_EDGE`): de pagina gaat met je vinger mee, en eronder staat waar je naartoe gaat ("‹ Overzicht"). Voorbij 40% van de breedte of met een snelle veeg ga je terug, anders schuift de pagina terug op zijn plek. Eerst omhoog of omlaag bewegen = scrollen, geen veeg. Een grafiek waar je vinger op begint, scrubt niet mee. Alleen aan als de app op het beginscherm staat (`navigator.standalone`); in Safari doet de browser deze veeg zelf. Uitproberen in een browser kan met `?veeg=1`.
+- Cache v22 (v21 is in gebruik op de branch `ux/v20-snelle-winst`).
+- Zelftests: 77 (nieuw: openen en terug over twee lagen met de scrollplek en de tabbalk die opnieuw begint; de veeg: alleen vanaf de rand, scrollen is geen veeg, kort en langzaam blijft staan, snel of ver gaat terug).
