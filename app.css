@@ -171,8 +171,8 @@ a { color: var(--label-2); }
   position: absolute; inset: 0;
   overflow-y: auto; overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
-  /* just clear of the tab bar (64 px + inset), so a tab that fits does not scroll */
-  padding: 0 16px calc(72px + env(safe-area-inset-bottom));
+  /* no tab bar: Overzicht is the only root and every page opens from it, so the page runs to the home indicator */
+  padding: 0 16px calc(var(--sp-4) + env(safe-area-inset-bottom));
   scroll-behavior: smooth;
 }
 
@@ -306,22 +306,6 @@ th { color: var(--label-2); font-weight: 500; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .table-wrap { max-height: 320px; overflow: auto; }
 
-/* ---------- tab bar ---------- */
-.tabbar {
-  position: absolute; left: 0; right: 0; bottom: 0;
-  display: flex; justify-content: space-around;
-  padding: 6px 8px calc(8px + env(safe-area-inset-bottom));
-  background: var(--tab-bg);
-  -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px);
-  border-top: 1px solid var(--separator);
-}
-.tab {
-  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
-  font-size: var(--t-caption); font-weight: 500; color: var(--label-3); padding: 4px 0;
-}
-.tab svg { width: 26px; height: 26px; }
-.tab[aria-pressed="true"] { color: var(--tint); }
-
 /* ---------- swipe from the left edge = back ---------- */
 /* the page follows the finger; under it, where it slides away, says where you go back to */
 .screen.swiping { background: var(--bg); box-shadow: -1px 0 0 var(--separator), -8px 0 24px rgba(0, 0, 0, 0.12); will-change: transform; }
@@ -353,7 +337,6 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .rain-row .spark { width: 96px; height: 16px; flex: none; }
 .rain-row .spark .base { stroke: var(--s1); stroke-opacity: 0.35; stroke-width: 1; }
 .rain-row .spark rect { fill: var(--s1); }
-.rain-row .chev { width: 16px; height: 16px; color: var(--label-3); flex: none; }
 .hour-strip { display: flex; overflow-x: auto; padding: 8px 6px 0; cursor: pointer; scrollbar-width: none; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }
 .hour-strip::-webkit-scrollbar { display: none; }
 .hour { flex: 0 0 46px; display: flex; flex-direction: column; align-items: center; gap: 3px; font-variant-numeric: tabular-nums; }
@@ -421,7 +404,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .tooltip .row .v { font-weight: 600; font-size: var(--t-sub); min-width: 56px; }
 .tooltip .row .n { opacity: 0.75; }
 .toast {
-  position: absolute; left: 16px; right: 16px; bottom: 100px; z-index: 30;
+  position: absolute; left: 16px; right: 16px; bottom: calc(var(--sp-6) + env(safe-area-inset-bottom)); z-index: 30;
   background: var(--tooltip-bg); color: var(--tooltip-fg); border-radius: var(--r-inner); padding: 10px 14px; font-size: var(--t-sub); text-align: center;
 }
 .attribution { font-size: var(--t-caption); color: var(--label-3); margin: 18px 0 8px; line-height: 1.5; }
@@ -543,15 +526,6 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 /* ---------- v23: back in the header, what can be tapped, pull to refresh (UX-audit B4, B10) ---------- */
 .back-btn { gap: 0; padding-left: 4px; }
 .back-btn .ico { width: 20px; height: 20px; }
-/* the hourly strip says it scrolls on and opens: it fades out at the right edge into a chevron */
-.card.hours { position: relative; }
-.strip-more {
-  position: absolute; top: 0; right: 0; bottom: 0; width: 34px; pointer-events: none;
-  display: flex; align-items: center; justify-content: flex-end; padding-right: 4px;
-  background: linear-gradient(90deg, transparent, var(--card) 70%); color: var(--label-3);
-  border-radius: 0 var(--r-card) var(--r-card) 0;
-}
-.strip-more svg { width: 12px; height: 16px; }
 /* pull to refresh: an arrow that turns over at the threshold, then spins while loading */
 .ptr {
   position: absolute; left: 50%; top: calc(6px + env(safe-area-inset-top)); z-index: 5;

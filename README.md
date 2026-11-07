@@ -297,3 +297,14 @@ Op `ux/v20-snelle-winst`. Keuzes van Ima: de proefversie van versie 25 vast in d
 - **Info:** de vragen over de band en de zeven dagen zeggen nu "8 van de 10 berekeningen" en leggen het woord uit.
 - Alle pagina's nagemeten met de iPhone-marges: alles past behalve Regen met regen in de komende 2 uur (afgesproken).
 - Cache v26. Zelftests: 89 (nieuw: band, naam en woord; aangepast: de ECMWF-test op 10/90%, de test van de zin en het boompje zonder schakelaar).
+
+## Versie 27: geen tabbalk meer; alles begint op Overzicht
+
+Op `ux/v20-snelle-winst`. Op verzoek van Ima, in plaats van C5 (Vandaag · Week · Regen):
+
+- **Geen tabbalk:** de balk onderaan is weg. Overzicht is het enige beginpunt; van daaruit open je Per uur (de uurstrook), Regen (de regenregel), een dag (de weeklijst), Wind (het boompje in de kaart van nu) en Info (ⓘ). Elke pagina heeft "‹ Overzicht" (of de pagina eronder) in de kop, en terugvegen werkt zoals op main. De laatst gekozen tab (`regen.tab`) wordt niet meer gebruikt: de app opent altijd op Overzicht.
+- **Wind** is een gewone pagina (`SUBPAGES`), te openen via het boompje.
+- **Temperatuur en Bewolking zijn weg** (`renderTemp`, `renderCloud`, `cloudHint`). Voelt als en de temperatuur van nu staan in de tegel van Per uur; bewolking zit in de icoontjes en in de grijze tint van de grafieken. In Info heet de vraag over bewolking nu "Hoe telt de app bewolking?", zonder de zin over de grijze lijn.
+- **Geen pijltjes meer** bij de regenregel en aan de rand van de uurstrook.
+- **Ruimte:** de pagina loopt nu door tot de thuisbalk (16 px plus de veilige marge, was 72 px voor de tabbalk); meldingen staan 24 px boven de thuisbalk. Nagemeten met de iPhone-marges: Overzicht heeft 57 px over, Per uur en de dagen 80 tot 110 px, Wind 104 px; Regen loopt met regen in de komende 2 uur nog 58 px over (was 114).
+- Cache v27. Zelftests: 89 (aangepast: geen tabbalk, het boompje opent Wind, geen pijltjes, Wind in plaats van Temperatuur in de kop- en luchttests).

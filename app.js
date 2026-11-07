@@ -902,7 +902,6 @@ const state = { loc: DEFAULT_LOC, tab: 'overview', nowcast: null, forecast: null
 try {
   const l = JSON.parse(localStorage.getItem('regen.loc') || 'null');
   if (l && Number.isFinite(l.lat) && Number.isFinite(l.lon)) state.loc = l;
-  const t = localStorage.getItem('regen.tab'); if (t && ['overview', 'temp', 'wind', 'cloud'].includes(t)) state.tab = t;
   const hz = parseFloat(localStorage.getItem('regen.horizon')); if (Number.isFinite(hz) && hz >= HORIZON_MIN) state.horizon = hz;
 } catch (e) {}
 
@@ -1246,9 +1245,8 @@ async function load() {
 /* ======================================================================
    4. Views
    ====================================================================== */
-// overview = the days (Week); hours (Per uur) and rain (Regen) open from its top card and sit under the Overzicht tab
-const TABS = { rain: 'Regen', overview: 'Overzicht', hours: 'Per uur', temp: 'Temperatuur', wind: 'Wind', cloud: 'Bewolking', info: 'Info' };
-const TAB_OF = { hours: 'overview', rain: 'overview', day: 'overview' }; // which tab button lights up for a page without its own
+// Overzicht is the one root (there is no tab bar): Per uur, Regen, a day, Wind (the tree) and Info open from it
+const TABS = { rain: 'Regen', overview: 'Overzicht', hours: 'Per uur', wind: 'Wind', info: 'Info' };
 /* Title of the page: a day page is named after its day (Vandaag, Morgen, Zaterdag). */
 function pageTitle() {
   if (state.tab !== 'day' || !state.day) return TABS[state.tab];
@@ -1292,7 +1290,6 @@ function render() {
   const sunline = SUNLINE_TABS.has(state.tab);
   $('sunline').hidden = !sunline;
   document.title = `${placeTitle ? 'Weer' : pageTitle()} · ${state.loc.name}`;
-  for (const btn of document.querySelectorAll('.tab')) btn.setAttribute('aria-pressed', String(btn.dataset.tab === (TAB_OF[state.tab] || state.tab)));
   if (sunline) renderSunline();
   const c = $('content');
   c.classList.toggle('ov', placeTitle);
@@ -1310,7 +1307,7 @@ function render() {
       c.appendChild(errorState()); return;
     }
     if (stale && state.tab !== 'info') c.appendChild(staleNote(stale));
-    ({ rain: renderRainPage, overview: renderWeek, hours: renderHours, day: renderDayPage, temp: renderTemp, wind: renderWind, cloud: renderCloud, info: renderInfo })[state.tab](c);
+    ({ rain: renderRainPage, overview: renderWeek, hours: renderHours, day: renderDayPage, wind: renderWind, info: renderInfo })[state.tab](c);
   } finally {
     c.style.minHeight = '';
     if (screen.scrollTop !== keepScroll) screen.scrollTop = keepScroll;
@@ -1608,8 +1605,6 @@ function topCard(c) {
   if (!strip) return;
   const k = h('section', 'card hours');
   k.appendChild(strip);
-  // it scrolls on and opens Per uur: fade into a chevron at the right edge
-  k.insertAdjacentHTML('beforeend', '<span class="strip-more" aria-hidden="true"><svg viewBox="0 0 12 16"><path d="M3.5 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>');
   c.appendChild(k);
 }
 /* ---- UX-audit step 5: the weather in words, the sky of now behind the header ---- */
@@ -1683,10 +1678,10 @@ function nowCard(c) {
     const parts = [];
     if (feel != null) parts.push(`voelt als ${fmtNum(feel, 0)}°`);
     if (range) parts.push(`vandaag ${fmtNum(range.mn, 0)}° tot ${fmtNum(range.mx, 0)}°`);
-    // one line, so the week still fits: the station is on Temperatuur and Wind, here only measured or forecast
+    // one line, so the week still fits: the station is on Wind and in the tooltip, here only measured or forecast
     parts.push(o && o.temp != null ? `gemeten ${fmtTime(o.time)}` : 'verwacht');
     const source = o && o.temp != null ? `Gemeten ${fmtTime(o.time)} bij ${o.station} (${fmtNum(o.dist, 0)} km)` : 'Verwacht, geen meting';
-    // UX-audit C1: the weather in one or two sentences instead of a feels-like line, which is on Temperatuur and
+    // UX-audit C1: the weather in one or two sentences instead of a feels-like line, which is in the tile of Per uur and
     // in the row Vandaag as well; where the temperature comes from stays in the tooltip
     const say = h('p', 'now-say', weatherLine(now));
     say.title = `${source} · ${parts.join(' · ')}`;
@@ -1705,7 +1700,7 @@ function nowCard(c) {
       // at a third of the size on Wind the streaks need more ink to be seen: twice as opaque (CSS: thicker too)
       field.style.setProperty('--wop', String(Math.min(0.9, (parseFloat(field.style.getPropertyValue('--wop')) || 0) * 2)));
       windTree(g, kmh, dir, null);
-      btn.addEventListener('click', () => document.querySelector('.tab[data-tab="wind"]').click());
+      btn.addEventListener('click', () => openPage('wind')); // Wind has no tab any more: the tree is the way in
       top.appendChild(btn); top.classList.add('with-tree');
     }
     k.appendChild(top);
@@ -1740,7 +1735,6 @@ function rainRow() {
     });
     row.appendChild(svg);
   }
-  row.insertAdjacentHTML('beforeend', '<svg class="chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7.5 4.5L13 10l-5.5 5.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>');
   row.addEventListener('click', () => openPage('rain'));
   return row;
 }
@@ -1798,7 +1792,7 @@ function sunCell(ev) {
 }
 /* Pages that are not a tab: they open on top of another page and get "‹ <that page>" in the header, where the
    place button sits on a tab (UX-audit B4). */
-const SUBPAGES = new Set(['hours', 'rain', 'day', 'info']);
+const SUBPAGES = new Set(['hours', 'rain', 'day', 'wind', 'info']); // everything but Overzicht, which is the only root
 function backTarget() {
   const top = nav.stack[nav.stack.length - 1];
   return top ? top.title : TABS.overview;
@@ -2380,7 +2374,7 @@ function renderInfo(c) {
     c.lastChild.querySelector('p').className = 'err';
   }
   const SEE = [
-    'De app toont de verwachting voor de gekozen plaats. <b>Overzicht</b> draagt de naam van de plaats (tik erop om een andere te kiezen) en begint met het weer van nu: de temperatuur, het weerbeeld, hoe koud het voelt en de laagste en hoogste temperatuur van vandaag. Daaronder de regenregel: hoe lang het droog blijft, of wanneer het gaat regenen; komt er regen aan, dan kleurt de regel blauw met een mini-radar per 5 minuten. Daaronder het weer per uur en de komende zeven dagen, met per dag het weerbeeld, de laagste en hoogste temperatuur en de kans op regen. Tik op de regenbalk voor <b>Regen</b> (de radar voor de komende 2 uur en de neerslag per uur met de kans op regen) en op de uurstrook voor <b>Per uur</b>, dat temperatuur en weerbeeld per uur naast elkaar zet. Tik op een dag in de lijst voor dezelfde pagina voor alleen die dag (vandaag de hele dag vanaf middernacht, met een stippellijn op nu; de uren daarvoor zijn wat het model verwachtte, geen metingen); voor de dagen na morgen komt die uit het ECMWF-ensemble: de lijn is de middelste van de 51 berekeningen en de band laat zien waar 8 van de 10 berekeningen zitten (de hoogste en de laagste 10% vallen erbuiten), voor temperatuur én regen; bij regen noemt de tooltip die band gewoon als "0,0 tot 0,4 mm", omdat de middelste waarde bij buien bijna altijd 0 is, en de boompjes tonen de wind van de middelste berekening; "‹ Overzicht" linksboven brengt je terug. Trek een pagina bovenaan omlaag om te verversen. <b>Temperatuur</b>, <b>Wind</b> en <b>Bewolking</b> tonen elk hun eigen verloop.',
+    'De app toont de verwachting voor de gekozen plaats. <b>Overzicht</b> draagt de naam van de plaats (tik erop om een andere te kiezen) en begint met het weer van nu: de temperatuur, het weerbeeld, hoe koud het voelt en de laagste en hoogste temperatuur van vandaag. Daaronder de regenregel: hoe lang het droog blijft, of wanneer het gaat regenen; komt er regen aan, dan kleurt de regel blauw met een mini-radar per 5 minuten. Daaronder het weer per uur en de komende zeven dagen, met per dag het weerbeeld, de laagste en hoogste temperatuur en de kans op regen. Tik op de regenbalk voor <b>Regen</b> (de radar voor de komende 2 uur en de neerslag per uur met de kans op regen) en op de uurstrook voor <b>Per uur</b>, dat temperatuur en weerbeeld per uur naast elkaar zet. Tik op een dag in de lijst voor dezelfde pagina voor alleen die dag (vandaag de hele dag vanaf middernacht, met een stippellijn op nu; de uren daarvoor zijn wat het model verwachtte, geen metingen); voor de dagen na morgen komt die uit het ECMWF-ensemble: de lijn is de middelste van de 51 berekeningen en de band laat zien waar 8 van de 10 berekeningen zitten (de hoogste en de laagste 10% vallen erbuiten), voor temperatuur én regen; bij regen noemt de tooltip die band gewoon als "0,0 tot 0,4 mm", omdat de middelste waarde bij buien bijna altijd 0 is, en de boompjes tonen de wind van de middelste berekening; "‹ Overzicht" linksboven brengt je terug. Trek een pagina bovenaan omlaag om te verversen. Tik op het boompje in de kaart van nu voor <b>Wind</b>. Alles begint op Overzicht; er is geen tabbalk.',
     'Zoomen: spreid twee vingers op een grafiek om in te zoomen, knijp ze samen om weer verder vooruit te kijken (tot 48 uur). De grafiek begint altijd bij nu; de titel van de kaart toont hoeveel uur je ziet en de keuze wordt onthouden. Sleep met één vinger over een grafiek om de waarden van dat moment te zien; de stippellijn volgt je vinger.',
     'De achtergrond van elke grafiek volgt de zon: warm bij daglicht, grijzer naarmate er meer bewolking is, donker in de nacht, met schemer ertussen. De zonnetjes boven de grafiek staan op zonsopkomst en -ondergang en tonen het weerbeeld van dat moment.',
     'Het <b>weerbeeld</b> van een verwacht uur (zonnig, half bewolkt, dunne bewolking, bewolkt, regen) komt uit de bewolking van het model: minder dan 30% is zonnig, 30 tot 70% half bewolkt. Is de lucht (bijna) dicht, dan kijkt de app hoeveel zon er nog doorkomt, vergeleken met een heldere hemel: veel zon betekent losse wolken (half bewolkt), een flink deel betekent een sluier van dunne, hoge wolken (dunne bewolking: zon boven drie strepen) en weinig zon een dik wolkendek (bewolkt). Bij lage zon en \'s nachts beslissen de lagen: alleen hoge wolken is dunne bewolking. Vanaf 0,1 mm in het uur is het regen. Het weerbeeld van nu in de tegel komt uit de metingen.',
@@ -2402,7 +2396,7 @@ function renderInfo(c) {
   const READ = [
     'Een <b>neerslagstaaf</b> is de som over dat uur; de radarstaven zijn de intensiteit op dat moment, in millimeter per uur. De uren die de radar dekt (ongeveer de eerste twee) komen ook in de uurgrafiek uit de radar, zodat beide grafieken hetzelfde zeggen; voor die uren staat er geen kans. Van het lopende uur telt alleen wat nog komt. Lichte regen is 0,1 tot 1 mm per uur, matige regen 1 tot 4, zware regen meer dan 4.',
     '<b>Windpijlen</b> (elke 3 uur) wijzen waarheen de wind waait; in de tekst staat waar de wind vandaan komt, zoals gebruikelijk. Beaufort volgt uit de uursnelheid volgens de KNMI-tabel; de boom laat zien wat die kracht met een boom doet.',
-    '<b>Bewolking</b> is het deel van de hemel dat bedekt is. De lijn wordt donkerder grijs naarmate er meer bewolking is. Het model geeft per uur een momentopname van één vakje van 2 km, die bij losse wolken tussen 0 en 100% springt; de app middelt daarom elk uur met het uur ervoor en erna.',
+    '<b>Bewolking</b> is het deel van de hemel dat bedekt is. Het model geeft per uur een momentopname van één vakje van 2 km, die bij losse wolken tussen 0 en 100% springt; de app middelt daarom elk uur met het uur ervoor en erna.',
   ];
   // UX-audit B8: the same text, behind short questions that each open on a tap (native <details>, so it works
   // with the keyboard and a screen reader without any script); then the sources as a table and Beaufort
@@ -2419,7 +2413,7 @@ function renderInfo(c) {
     ['Hoe zoom ik, en wat betekent de kleur achter een grafiek?', [SEE[1], SEE[2]]],
     ['Wat betekent een neerslagstaaf?', [READ[0]]],
     ['Hoe lees ik de wind en de boom?', [READ[1]]],
-    ['Wat betekent bewolking in procenten?', [READ[2]]],
+    ['Hoe telt de app bewolking?', [READ[2]]],
     ['Wat gebeurt er zonder verbinding?', [SRC[7]]],
   ];
   const faq = h('section', 'card info faq');
@@ -2463,39 +2457,6 @@ function renderInfo(c) {
   c.appendChild(h('p', 'info-foot', 'Deze app is een privéprototype. Instellingen zoals plaats en zoom, en de laatst opgehaalde weergegevens, blijven op je eigen telefoon; er worden geen gegevens verzameld.'));
 }
 
-/* ---------------- Temperatuur ---------------- */
-function renderTemp(c) {
-  const H = needHarmonie(c); if (!H) return;
-  const T = tempModel();
-  const nowRow = T.instant[0];
-  const { mn, mx } = todayRange(T);
-  // the ICON-D2 ensemble band only belongs around an ICON-D2 line
-  const withBand = T.key === TEMP_MODEL.key;
-  const o = state.obs;
-  const tempIcon = '<svg class="ico-big" viewBox="0 0 24 24"><path d="M10 4a2 2 0 0 1 4 0v9.3a4 4 0 1 1-4 0V4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="17" r="1.6" fill="currentColor"/><path d="M12 10v7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
-  if (o && o.temp != null) {
-    heroBlock(c, tempIcon, `Gemeten ${fmtTime(o.time)} · ${o.station} (${fmtNum(o.dist, 0)} km)`, `${fmtNum(o.temp, 0)}°`,
-      `voelt als ${fmtNum(o.feel != null ? o.feel : nowRow.apparent_temperature, 0)}° · verwacht nu ${fmtNum(nowRow.temperature_2m, 0)}° · vandaag ${fmtNum(mn, 0)}° tot ${fmtNum(mx, 0)}°`);
-  } else {
-    heroBlock(c, tempIcon, `Nu · ${fmtTime(nowRow.t)} · verwacht`, `${fmtNum(nowRow.temperature_2m, 0)}°`, `voelt als ${fmtNum(nowRow.apparent_temperature, 0)}° · vandaag ${fmtNum(mn, 0)}° tot ${fmtNum(mx, 0)}°`);
-  }
-
-  const k1 = card(spanTitle(), []);
-  c.appendChild(k1.el);
-  drawChart(k1.body, { sky: skyOf(),
-    ...spanFor([H]), unit: '°C', unitTip: '°C', ticks: 'days', height: 260, now: new Date(), yOpts: { minSpan: 6, targetTicks: 4 },
-    series: [
-      ...(withBand ? ensBand('temperature_2m') : []),
-      { kind: 'line', name: 'Temperatuur', color: 'var(--s1)', points: instantPts(T, 'temperature_2m'), area: true, smooth: 'soft' },
-      { kind: 'line', name: 'Gevoelstemperatuur', color: 'var(--s1)', points: instantPts(T, 'apparent_temperature'), secondary: true, smooth: 'soft' },
-    ],
-    fmt: v => fmtNum(v, 1), directLabels: 'minmax', tipTime: p => fmtDayTime(p.t), aria: 'Temperatuur per uur',
-    tipExtra: t => { const r = withBand && state.ens && state.ens.bands.temperature_2m.find(q => Math.abs(q.t.getTime() - t) < HOUR / 2); return r ? `8 van de 10: ${fmtNum(r.lo, 0)}° tot ${fmtNum(r.hi, 0)}°` : null; },
-  });
-  legend(k1.el, [{ name: 'Temperatuur (2 m)', color: 'var(--s1)' }, { name: 'Gevoelstemperatuur', color: 'var(--s1)', dashed: true }, ...(withBand ? ensLegend() : [])]);
-  k1.tableHost.appendChild(dataTable(T.instant, [{ label: 'Uur', get: p => fmtDayTime(p.t) }, { label: '°C', num: true, get: p => fmtNum(p.temperature_2m, 1) }, { label: 'Gevoel', num: true, get: p => fmtNum(p.apparent_temperature, 1) }]));
-}
-
 /* ---------------- Wind ---------------- */
 function renderWind(c) {
   const H = needHarmonie(c); if (!H) return;
@@ -2534,38 +2495,6 @@ function renderWind(c) {
   // short names keep the legend on one line; the arrows are explained under Info
   legend(k1.el, [{ name: 'Wind', color: 'var(--s1)' }, { name: 'Stoten', color: 'var(--s1)', dashed: true }, ...ensLegend()]);
   k1.tableHost.appendChild(dataTable(H.instant, [{ label: 'Uur', get: p => fmtDayTime(p.t) }, { label: 'km/u', num: true, get: p => fmtNum(p.wind_speed_10m, 0) }, { label: 'Stoten', num: true, get: p => fmtNum(p.wind_gusts_10m, 0) }, { label: 'Uit', get: p => `${compass(p.wind_direction_10m)} ${fmtDeg(p.wind_direction_10m)}` }]));
-}
-
-/* ---------------- Bewolking ---------------- */
-/* "62% bedekt · laag 40% · hoog 30%": a layer only when it has cloud (four times 0% said nothing, UX-audit D) */
-function cloudHint(r) {
-  const layers = [['laag', r.cloud_cover_low], ['midden', r.cloud_cover_mid], ['hoog', r.cloud_cover_high]]
-    .filter(([, v]) => v > 0).map(([k, v]) => `${k} ${v}%`);
-  return [`${r.cloud_cover}% bedekt`, ...layers].join(' · ');
-}
-function renderCloud(c) {
-  const H = needHarmonie(c); if (!H) return;
-  const r0 = H.instant[0];
-  heroBlock(c, '<svg class="ico-big" viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 10h.5a4 4 0 0 1 0 8H7z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
-    `Nu · ${fmtTime(r0.t)}`, cloudWord(r0.cloud_cover), cloudHint(r0));
-
-  const k1 = card(spanTitle(), []);
-  c.appendChild(k1.el);
-  const pct = { min: 0, max: 100, step: 25 };
-  drawChart(k1.body, { sky: skyOf(),
-    ...spanFor([H]), unit: '%', unitTip: '%', ticks: 'days', height: 260, now: new Date(), yFixed: pct,
-    series: [
-      ...ensBand('cloud_cover', 'var(--cloud-hi)'),
-      { kind: 'line', name: 'Totaal', color: 'var(--cloud-hi)', colorAt: cloudGrey, points: instantPts(H, 'cloud_cover'), area: true, areaOpacity: 0.18 },
-      { kind: 'line', name: 'Lage bewolking', color: 'var(--cloud-mid)', points: instantPts(H, 'cloud_cover_low'), secondary: true },
-    ],
-    fmt: v => fmtNum(v, 0), tipTime: p => fmtDayTime(p.t),
-    tipNote: (s, p) => (s.name === 'Totaal' ? ` · midden ${p.row.cloud_cover_mid}% · hoog ${p.row.cloud_cover_high}%` : ''),
-    tipExtra: t => { const r = state.ens && state.ens.bands.cloud_cover.find(q => Math.abs(q.t.getTime() - t) < HOUR / 2); return r ? `8 van de 10: ${fmtNum(r.lo, 0)} tot ${fmtNum(r.hi, 0)}%` : null; },
-    aria: 'Bewolking per uur volgens HARMONIE',
-  });
-  legend(k1.el, [{ name: 'Totale bedekking', color: 'var(--cloud-hi)', note: 'donkerder = meer bewolking' }, { name: 'Lage bewolking (< 2 km)', color: 'var(--cloud-mid)', dashed: true }, ...ensLegend('var(--cloud-hi)')]);
-  k1.tableHost.appendChild(dataTable(H.instant, [{ label: 'Uur', get: p => fmtDayTime(p.t) }, { label: 'Totaal', num: true, get: p => `${p.cloud_cover}%` }, { label: 'Laag', num: true, get: p => `${p.cloud_cover_low}%` }, { label: 'Midden', num: true, get: p => `${p.cloud_cover_mid}%` }, { label: 'Hoog', num: true, get: p => `${p.cloud_cover_high}%` }]));
 }
 
 /* ======================================================================
@@ -2780,16 +2709,6 @@ function ptrCancel() { if (ptr.engaged) ptrHide(); ptr.on = false; ptr.engaged =
 
 $('infoBtn').addEventListener('click', () => openPage('info'));
 $('backBtn').addEventListener('click', goBackOrHome);
-for (const btn of document.querySelectorAll('.tab')) {
-  btn.addEventListener('click', () => {
-    if (state.tab === btn.dataset.tab) { $('screen').scrollTo({ top: 0 }); return; }
-    resetNav();
-    state.tab = btn.dataset.tab;
-    try { localStorage.setItem('regen.tab', state.tab); } catch (e) {}
-    toTop();
-    render(); pageAnim('fade');
-  });
-}
 function openSheet() { $('sheet').hidden = false; $('sheetBackdrop').hidden = false; $('results').textContent = ''; $('q').value = ''; setTimeout(() => $('q').focus(), 50); }
 function closeSheet() { $('sheet').hidden = true; $('sheetBackdrop').hidden = true; }
 $('locBtn').addEventListener('click', openSheet);
@@ -3219,7 +3138,6 @@ function runTests() {
       const host = h('div'); renderWeek(host);
       host.querySelector('.hour-strip').click();
       eq(state.tab, 'hours'); eq($('title').textContent, 'Per uur');
-      eq(document.querySelector('.tab[data-tab="overview"]').getAttribute('aria-pressed'), 'true', 'tab Overzicht gemarkeerd');
       const back = $('backBtn'); ok(!back.hidden, 'terugknop in de kop');
       back.click(); eq(state.tab, 'overview'); ok($('content').querySelector('.week-list'), 'terug bij de dagen');
     } finally { state.forecast = saved.f; state.obs = saved.o; state.ens = saved.e; state.ecmwf = saved.c; state.tab = saved.t; render(); }
@@ -3238,8 +3156,7 @@ function runTests() {
       const host = h('div'); renderWeek(host);
       host.querySelector('.rain-row').click();
       eq(state.tab, 'rain'); eq($('title').textContent, 'Regen');
-      eq(document.querySelector('.tab[aria-pressed="true"]').dataset.tab, 'overview', 'tab Overzicht gemarkeerd');
-      ok(!$('backBtn').hidden, 'terugknop in de kop'); ok(!document.querySelector('.tab[data-tab="rain"]'), 'geen Regen-tab meer');
+      ok(!$('backBtn').hidden, 'terugknop in de kop'); ok(!document.querySelector('.tabbar'), 'geen tabbalk');
     } finally { state.forecast = saved.f; state.obs = saved.o; state.ens = saved.e; state.ecmwf = saved.c; state.nowcast = saved.n; state.tab = saved.t; render(); }
   });
   test('v21: droog zegt hoe lang, zonder lege mini-radar; Regen-pagina zonder lege grafiek', () => {
@@ -3278,13 +3195,11 @@ function runTests() {
       eq(cells[cells.indexOf(sun[0]) - 1].querySelector('.hl').textContent, '07', 'zon op na het uur van 07');
       ok(sun[0].getAttribute('aria-label').startsWith('Zon op om 07:'), 'zon op'); eq(sun[0].querySelector('.ht').textContent, 'op');
       ok(sun[1].getAttribute('aria-label').startsWith('Zon onder om 17:'), 'zon onder');
-      state.tab = 'temp'; render(); ok(!$('locBtn').hidden, 'plaatsknop terug'); eq($('title').textContent, 'Temperatuur'); ok($('sunline').hidden, 'geen zonregel op Temperatuur');
+      state.tab = 'wind'; render(); ok($('locBtn').hidden && !$('backBtn').hidden, 'Wind is een pagina met terug'); eq($('title').textContent, 'Wind'); ok($('sunline').hidden, 'geen zonregel op Wind');
       state.tab = 'hours'; render(); ok(!$('sunline').hidden, 'zonregel op Per uur');
     } finally { state.forecast = saved.f; state.obs = saved.o; state.ens = saved.e; state.ecmwf = saved.c; state.nowcast = saved.n; state.tab = saved.t; render(); }
   });
-  test('v21: bewolking noemt alleen lagen met wolken; fout in mensentaal, code onder Info', () => {
-    eq(cloudHint({ cloud_cover: 0, cloud_cover_low: 0, cloud_cover_mid: 0, cloud_cover_high: 0 }), '0% bedekt');
-    eq(cloudHint({ cloud_cover: 62, cloud_cover_low: 40, cloud_cover_mid: 0, cloud_cover_high: 30 }), '62% bedekt · laag 40% · hoog 30%');
+  test('v21: fout in mensentaal, code onder Info', () => {
     const es = errorState();
     ok(!es.textContent.includes('HTTP'), 'geen technische code'); ok(es.querySelector('button'), 'knop opnieuw proberen');
     const saved = state.errors;
@@ -3309,7 +3224,6 @@ function runTests() {
       const page = $('content');
       eq(page.querySelector('.hero .l').textContent, 'Zondag 1 november'); ok(page.querySelector('.hero .big').textContent.includes('10° tot 10°'), 'min en max van de dag');
       eq(page.querySelector('.card h2').textContent, 'Per uur'); ok(page.querySelector('.chart') && !page.querySelector('.chart.zoomable'), 'grafiek zonder zoom');
-      eq(document.querySelector('.tab[aria-pressed="true"]').dataset.tab, 'overview');
       $('backBtn').click(); eq(state.tab, 'overview');
     } finally { state.forecast = saved.f; state.obs = saved.o; state.ens = saved.e; state.ecmwf = saved.c; state.tab = saved.t; state.day = saved.d; render(); }
   });
@@ -3638,7 +3552,7 @@ function runTests() {
       toTop(); eq(s.scrollTop, 0, 'direct 0, niet halverwege een animatie');
     } finally { spacer.remove(); }
   });
-  test('terug: een dag openen en terug brengt je op Overzicht op dezelfde plek; de tabbalk begint opnieuw', () => {
+  test('terug: een dag openen en terug brengt je op Overzicht op dezelfde plek; het boompje opent Wind', () => {
     const saved = { f: state.forecast, o: state.obs, e: state.ens, c: state.ecmwf, t: state.tab, d: state.day, n: nav.stack };
     const s = $('screen'), spacer = h('div'); spacer.style.height = '3000px';
     try {
@@ -3653,10 +3567,9 @@ function runTests() {
       eq(s.scrollTop, at, 'terug op de plek waar je was');
       ok(!goBack(), 'op een tab is er geen terug');
       $('content').querySelector('.rain-row').click(); eq(state.tab, 'rain'); eq(nav.stack.length, 1);
-      document.querySelector('.tab[data-tab="wind"]').click(); eq(state.tab, 'wind'); eq(nav.stack.length, 0, 'tab = opnieuw beginnen');
+      $('backBtn').click(); eq(state.tab, 'overview'); $('content').querySelector('.now-tree').click(); eq(state.tab, 'wind', 'het boompje opent Wind'); eq(nav.stack.length, 1, 'Wind bovenop Overzicht'); ok(!$('backBtn').hidden); $('backBtn').click(); eq(state.tab, 'overview'); eq(nav.stack.length, 0);
     } finally {
       spacer.remove(); state.forecast = saved.f; state.obs = saved.o; state.ens = saved.e; state.ecmwf = saved.c; state.tab = saved.t; state.day = saved.d; nav.stack = saved.n; render();
-      try { localStorage.setItem('regen.tab', ['overview', 'temp', 'wind', 'cloud'].includes(saved.t) ? saved.t : 'overview'); } catch (e) {} // the Wind tap above saved itself
     }
   });
   test('terug: vegen vanaf de linkerrand, niet vanaf het midden; kort of omhoog vegen gaat niet terug', () => {
@@ -3680,7 +3593,7 @@ function runTests() {
     } finally { state.forecast = saved.f; state.obs = saved.o; state.ens = saved.e; state.ecmwf = saved.c; state.tab = saved.t; state.day = saved.d; nav.stack = saved.n; render(); }
   });
 
-  test('v23: terugknop in de kop zegt waarheen; geen pijltjes op de dagen; de strook een hint', () => {
+  test('v23: terugknop in de kop zegt waarheen; geen pijltjes op de dagen, de strook of de regenregel', () => {
     const saved = { f: state.forecast, o: state.obs, e: state.ens, c: state.ecmwf, t: state.tab, d: state.day, n: nav.stack };
     try {
       state.forecast = withDays(mkJson(), NOW, 52.37, 4.9); state.obs = null; state.ens = null;
@@ -3689,7 +3602,7 @@ function runTests() {
       ok($('backBtn').hidden, 'op een tab geen terug'); ok(!$('content').querySelector('.back-link'), 'geen losse terugregel meer');
       const rows = $('content').querySelectorAll('.week-row');
       ok(!$('content').querySelector('.week-row .go'), 'geen pijltjes op de dagen');
-      ok($('content').querySelector('.card.hours .strip-more'), 'hint aan de rand van de strook');
+      ok(!$('content').querySelector('.strip-more, .rain-row .chev'), 'geen pijltjes bij de regenregel en de strook');
       rows[1].click(); eq(state.tab, 'day');
       ok(!$('backBtn').hidden && $('locBtn').hidden, 'terug op de plek van de plaatsknop'); eq($('backLabel').textContent, 'Overzicht');
       $('infoBtn').click(); eq(state.tab, 'info'); eq($('backLabel').textContent, 'Zondag', 'Info gaat terug naar de dag');
@@ -3728,7 +3641,6 @@ function runTests() {
   });
   test('v24: ontwerptokens: letters, hoeken en afstanden komen uit de schaal', () => {
     const cs = el => getComputedStyle(el);
-    eq(cs(document.querySelector('.tab')).fontSize, '11px', 'tablabel caption 2');
     const host = $('content'), probe = h('section', 'card'); host.appendChild(probe);
     try {
       eq(cs(probe).marginTop, '12px', 'tussen kaarten'); eq(cs(probe).borderTopLeftRadius, '18px', 'kaarthoek');
@@ -3772,8 +3684,8 @@ function runTests() {
       ok(nc.querySelector('.now-tree svg .treeg'), 'boompje'); ok(nc.querySelector('.now-tree svg .windfield .streak'), 'met windveld');
       ok($('screen').classList.contains('sky'), 'lucht achter de kop');
       ok(/^rgb\(\d+,\d+,\d+\)$/.test($('screen').style.getPropertyValue('--sky-now')), 'luchtkleur gezet');
-      eq(getComputedStyle(document.querySelector('.tab[aria-pressed="true"]')).color, getComputedStyle(document.body).color, 'actieve tab in labelkleur');
-      state.tab = 'temp'; render(); ok(!$('screen').classList.contains('sky'), 'lucht alleen op Overzicht');
+      eq(getComputedStyle($('infoBtn')).color, getComputedStyle(document.body).color, 'knoppen in labelkleur'); ok(!document.querySelector('.tabbar, .tab'), 'geen tabbalk');
+      state.tab = 'wind'; render(); ok(!$('screen').classList.contains('sky'), 'lucht alleen op Overzicht');
       state.tab = 'info'; render(); ok(!$('content').querySelector('input[type="checkbox"]'), 'geen proefschakelaar meer');
     } finally {
       state.forecast = saved.f; state.obs = saved.o; state.ens = saved.e; state.ecmwf = saved.c; state.tab = saved.t; nav.stack = saved.n;
