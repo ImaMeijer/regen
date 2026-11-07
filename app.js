@@ -1764,7 +1764,7 @@ function renderEnsDay(c, d) {
     weatherAt: t => { const p = blocks.find(q => t >= q.t && t < q.tEnd); return p ? { cloud: p.cover, rain: p.pMed } : null; } };
   const icons = blocks.map(p => ({ t: mid(p), kind: p.kind, night: sunAltitude(mid(p), state.loc.lat, state.loc.lon) < SUN_RISESET, hour: p.t }));
   const trees = blocks.map(p => ({ t: mid(p), kmh: p.kmh, dir: p.dir, rain: p.pMed }));
-  const k = card('Per uur', ['Lijn: de middelste van 51 ECMWF-berekeningen · band: 90% ervan']);
+  const k = card('Per uur', []);
   c.appendChild(k.el);
   const word = p => { const ic = icons.find(i => i.hour.getTime() === p.t.getTime()); return ic ? (ic.kind === 'clear' && ic.night ? 'helder' : ICON_WORDS[ic.kind]) : ''; };
   drawChart(k.body, { sky, group: 'overview', tMin: a, tMax: b, noZoom: true, unit: '°C', unitTip: '°C', ticks: 'days', now: new Date(),
@@ -1844,9 +1844,6 @@ function renderWeek(c) {
     if (today && tNow != null) { const dot = h('span', 'now'); dot.style.left = pos(tNow); bar.appendChild(dot); }
     row.appendChild(bar);
     row.appendChild(h('span', 'mx', `${fmtNum(d.mx, 0)}°`));
-    // a day with a page of its own ends in a chevron (UX-audit B4); the others keep the column empty
-    if (hasDayPage(d)) row.insertAdjacentHTML('beforeend', '<svg class="go" viewBox="0 0 10 14" aria-hidden="true"><path d="M2.5 2l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>');
-    else row.appendChild(h('span'));
     row.setAttribute('aria-label', `${name}: ${ICON_WORDS[d.kind]}, ${fmtNum(d.mn, 0)} tot ${fmtNum(d.mx, 0)} graden` +
       (rainNote ? (d.chance != null ? `, kans op regen ${rainNote}` : `, ${rainNote} regen`) : ''));
     if (hasDayPage(d)) { // every day with hours behind it opens its own Per uur
@@ -2279,7 +2276,7 @@ function renderInfo(c) {
     c.lastChild.querySelector('p').className = 'err';
   }
   sec('Wat je ziet', [
-    'De app toont de verwachting voor de gekozen plaats. <b>Overzicht</b> draagt de naam van de plaats (tik erop om een andere te kiezen) en begint met het weer van nu: de temperatuur, het weerbeeld, hoe koud het voelt en de laagste en hoogste temperatuur van vandaag. Daaronder de regenregel: hoe lang het droog blijft, of wanneer het gaat regenen; komt er regen aan, dan kleurt de regel blauw met een mini-radar per 5 minuten. Daaronder het weer per uur en de komende zeven dagen, met per dag het weerbeeld, de laagste en hoogste temperatuur en de kans op regen. Tik op de regenbalk voor <b>Regen</b> (de radar voor de komende 2 uur en de neerslag per uur met de kans op regen) en op de uurstrook voor <b>Per uur</b>, dat temperatuur en weerbeeld per uur naast elkaar zet. Tik op een dag in de lijst voor dezelfde pagina voor alleen die dag (vandaag de hele dag vanaf middernacht, met een stippellijn op nu; de uren daarvoor zijn wat het model verwachtte, geen metingen); voor de dagen na morgen komt die uit het ECMWF-ensemble: de lijn is de middelste van de 51 berekeningen en de band laat zien waar 90% van de berekeningen zit (de 5% hoogste en de 5% laagste vallen erbuiten, zoals de lichte band van de KNMI-pluim), voor temperatuur én regen; bij regen noemt de tooltip die band gewoon als "0,0 tot 0,4 mm", omdat de middelste waarde bij buien bijna altijd 0 is, en de boompjes tonen de wind van de middelste berekening; "‹ Overzicht" linksboven brengt je terug. Een dag met een eigen pagina heeft een pijltje. Trek een pagina bovenaan omlaag om te verversen. <b>Temperatuur</b>, <b>Wind</b> en <b>Bewolking</b> tonen elk hun eigen verloop.',
+    'De app toont de verwachting voor de gekozen plaats. <b>Overzicht</b> draagt de naam van de plaats (tik erop om een andere te kiezen) en begint met het weer van nu: de temperatuur, het weerbeeld, hoe koud het voelt en de laagste en hoogste temperatuur van vandaag. Daaronder de regenregel: hoe lang het droog blijft, of wanneer het gaat regenen; komt er regen aan, dan kleurt de regel blauw met een mini-radar per 5 minuten. Daaronder het weer per uur en de komende zeven dagen, met per dag het weerbeeld, de laagste en hoogste temperatuur en de kans op regen. Tik op de regenbalk voor <b>Regen</b> (de radar voor de komende 2 uur en de neerslag per uur met de kans op regen) en op de uurstrook voor <b>Per uur</b>, dat temperatuur en weerbeeld per uur naast elkaar zet. Tik op een dag in de lijst voor dezelfde pagina voor alleen die dag (vandaag de hele dag vanaf middernacht, met een stippellijn op nu; de uren daarvoor zijn wat het model verwachtte, geen metingen); voor de dagen na morgen komt die uit het ECMWF-ensemble: de lijn is de middelste van de 51 berekeningen en de band laat zien waar 90% van de berekeningen zit (de 5% hoogste en de 5% laagste vallen erbuiten, zoals de lichte band van de KNMI-pluim), voor temperatuur én regen; bij regen noemt de tooltip die band gewoon als "0,0 tot 0,4 mm", omdat de middelste waarde bij buien bijna altijd 0 is, en de boompjes tonen de wind van de middelste berekening; "‹ Overzicht" linksboven brengt je terug. Trek een pagina bovenaan omlaag om te verversen. <b>Temperatuur</b>, <b>Wind</b> en <b>Bewolking</b> tonen elk hun eigen verloop.',
     'Zoomen: spreid twee vingers op een grafiek om in te zoomen, knijp ze samen om weer verder vooruit te kijken (tot 48 uur). De grafiek begint altijd bij nu; de titel van de kaart toont hoeveel uur je ziet en de keuze wordt onthouden. Sleep met één vinger over een grafiek om de waarden van dat moment te zien; de stippellijn volgt je vinger.',
     'De achtergrond van elke grafiek volgt de zon: warm bij daglicht, grijzer naarmate er meer bewolking is, donker in de nacht, met schemer ertussen. De zonnetjes boven de grafiek staan op zonsopkomst en -ondergang en tonen het weerbeeld van dat moment.',
     'Het <b>weerbeeld</b> van een verwacht uur (zonnig, half bewolkt, dunne bewolking, bewolkt, regen) komt uit de bewolking van het model: minder dan 30% is zonnig, 30 tot 70% half bewolkt. Is de lucht (bijna) dicht, dan kijkt de app hoeveel zon er nog doorkomt, vergeleken met een heldere hemel: veel zon betekent losse wolken (half bewolkt), een flink deel betekent een sluier van dunne, hoge wolken (dunne bewolking: zon boven drie strepen) en weinig zon een dik wolkendek (bewolkt). Bij lage zon en \'s nachts beslissen de lagen: alleen hoge wolken is dunne bewolking. Vanaf 0,1 mm in het uur is het regen. Het weerbeeld van nu in de tegel komt uit de metingen.',
@@ -3186,7 +3183,7 @@ function runTests() {
       eq(state.tab, 'day'); eq($('title').textContent, 'Maandag');
       const page = $('content');
       eq(page.querySelector('.hero .l').textContent, 'Maandag 2 november'); eq(page.querySelector('.card h2').textContent, 'Per uur');
-      ok(page.querySelector('.card .meta').textContent.includes('90% ervan'), 'uitleg van de band'); ok(!page.textContent.includes('10–90'), 'geen 10–90 meer');
+      ok(!page.querySelector('.card .meta'), 'geen uitlegregel boven de grafiek (staat onder Info)'); ok(!page.textContent.includes('10–90'), 'geen 10–90 meer');
       eq(page.querySelectorAll('.chart').length, 2, 'temperatuur en neerslag'); ok(!page.querySelector('.chart.zoomable'), 'zonder zoom');
       ok(page.querySelectorAll('.chart path.band').length >= 2, 'banden voor temperatuur en regen'); ok(page.querySelector('.mtree'), 'boompjes');
     } finally { state.forecast = saved.f; state.obs = saved.o; state.ens = saved.e; state.ecmwf = saved.c; state.tab = saved.t; state.day = saved.d; render(); }
@@ -3527,7 +3524,7 @@ function runTests() {
     } finally { state.forecast = saved.f; state.obs = saved.o; state.ens = saved.e; state.ecmwf = saved.c; state.tab = saved.t; state.day = saved.d; nav.stack = saved.n; render(); }
   });
 
-  test('v23: terugknop in de kop zegt waarheen; dagen met een pagina hebben een pijltje; de strook een hint', () => {
+  test('v23: terugknop in de kop zegt waarheen; geen pijltjes op de dagen; de strook een hint', () => {
     const saved = { f: state.forecast, o: state.obs, e: state.ens, c: state.ecmwf, t: state.tab, d: state.day, n: nav.stack };
     try {
       state.forecast = withDays(mkJson(), NOW, 52.37, 4.9); state.obs = null; state.ens = null;
@@ -3535,8 +3532,7 @@ function runTests() {
       nav.stack = []; state.tab = 'overview'; render();
       ok($('backBtn').hidden, 'op een tab geen terug'); ok(!$('content').querySelector('.back-link'), 'geen losse terugregel meer');
       const rows = $('content').querySelectorAll('.week-row');
-      ok(rows[0].querySelector('.go') && rows[1].querySelector('.go'), 'pijltje op dagen met een pagina'); ok(!rows[2].querySelector('.go'), 'geen pijltje zonder pagina');
-      eq(rows[0].children.length, rows[2].children.length, 'kolommen blijven gelijk');
+      ok(!$('content').querySelector('.week-row .go'), 'geen pijltjes op de dagen');
       ok($('content').querySelector('.card.hours .strip-more'), 'hint aan de rand van de strook');
       rows[1].click(); eq(state.tab, 'day');
       ok(!$('backBtn').hidden && $('locBtn').hidden, 'terug op de plek van de plaatsknop'); eq($('backLabel').textContent, 'Overzicht');

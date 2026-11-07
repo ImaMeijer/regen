@@ -345,7 +345,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .hour .ht { font-size: 15px; font-weight: 500; }
 .week-list { list-style: none; margin: 0; padding: 0; }
 .week-row {
-  display: grid; grid-template-columns: 4.6em 46px 2.2em 1fr 2.2em 10px; align-items: center; gap: 8px;
+  display: grid; grid-template-columns: 4.6em 46px 2.2em 1fr 2.2em; align-items: center; gap: 8px;
   min-height: 44px; padding: 2px 0; border-top: 1px solid var(--separator); /* Apple's row height: seven days and the card of now fit one screen */
   font-size: 17px; font-variant-numeric: tabular-nums;
 }
@@ -528,8 +528,6 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 /* ---------- v23: back in the header, what can be tapped, pull to refresh (UX-audit B4, B10) ---------- */
 .back-btn { gap: 0; padding-left: 4px; }
 .back-btn .ico { width: 20px; height: 20px; }
-/* a day with a page of its own ends in a chevron, as a list row does on the iPhone */
-.week-row .go { width: 10px; height: 14px; color: var(--label-3); justify-self: end; }
 /* the hourly strip says it scrolls on and opens: it fades out at the right edge into a chevron */
 .card.hours { position: relative; }
 .strip-more {

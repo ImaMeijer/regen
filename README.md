@@ -255,3 +255,9 @@ Op `ux/v20-snelle-winst`, na het mergen van main (de terug-stapel en het terugve
 - **Trekken om te verversen (B10):** bovenaan een pagina omlaag trekken; een pijltje komt mee en slaat om bij 60 px (de helft van de vingerbeweging telt), loslaten ververst en het pijltje draait tot `load()` klaar is. Niet zijwaarts, niet omhoog, niet als de pagina gescrold is, niet tijdens de veeg of het knijpen; een grafiek waar je vinger op begint scrubt niet mee.
 - **Eén scherm:** Overzicht, Per uur en Vandaag passen met de iPhone-marges. Regen (134 px) en een ECMWF-dag (34 px, door de omschrijving die over twee regels breekt) passen nog niet; dat was al zo en staat in de audit (B7, D).
 - Cache v23. Zelftests: 83 (nieuw: terugknop in de kop met label, pijltjes en strookhint, trekken om te verversen; de bestaande tests zoeken de terugknop nu in de kop).
+
+## Versie 23, aanvulling: geen pijltjes op de dagen, ECMWF-dag zonder uitlegregel
+
+- Op verzoek van Ima: de pijltjes rechts van de dagrijen zijn weer weg (de temperatuurbalk heeft zijn breedte terug). De hint aan de rechterrand van de uurstrook blijft.
+- De regel "Lijn: de middelste van 51 ECMWF-berekeningen · band: 90% ervan" boven de grafiek van een ECMWF-dag is weg; de uitleg staat onder Info. Daarmee passen alle dagpagina's op één iPhone-scherm (nagemeten met de marges van statusbalk en thuisbalk, ook als het weerbeeld over twee regels breekt).
+- Regen past niet op één scherm zodra er regen in de komende 2 uur is (dan staat de radargrafiek erbij); dat blijft zo, op aanwijzing van Ima.
