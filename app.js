@@ -1335,7 +1335,7 @@ const hourKind = (iv, r) => forecastKind({ cloud: r.cloud_cover, low: r.cloud_co
 /* Weather at an instant, from HARMONIE, for the sky tint and the sunrise/sunset glyphs: the icon and rain of
    the hour containing t (its cloud cover at the start of that hour, else of the nearest hour). */
 function weatherAt(t) {
-  const H = state.forecast && state.forecast.models.harmonie;
+  const H = withPast(state.forecast && state.forecast.models.harmonie, 'harmonie'); // the day page of today starts at midnight
   if (!H || !H.applicable) return null;
   const ms = t.getTime();
   let best = null;
@@ -1956,8 +1956,28 @@ function buildDays(fc, lat, lon, maxDays = 7) {
 function withDays(json, now, lat, lon) {
   const f = parseForecast(json, now);
   const d0 = new Date(now); d0.setHours(0, 0, 0, 0);
-  try { f.days = buildDays(parseForecast(json, d0), lat, lon); } catch (e) { f.days = []; }
+  f.past = {};
+  try {
+    const full = parseForecast(json, d0);
+    f.days = buildDays(full, lat, lon);
+    // the hours of today before now, so the day page of today can show the whole day (withPast)
+    for (const [k, m] of Object.entries(full.models)) {
+      f.past[k] = { instant: m.instant.filter(r => r.t < f.startHour), interval: m.interval.filter(p => p.t < f.startHour) };
+    }
+  } catch (e) { f.days = []; }
   return f;
+}
+/* A model with today's hours before now in front: what the model expected for them, not what was measured.
+   For the day page of today (whole day, with the now line) and the sky tint of those hours. */
+const pastCache = new WeakMap(); // weatherAt runs for every few pixels of sky: merge once per model object
+function withPast(m, key) {
+  const p = m && state.forecast && state.forecast.past && state.forecast.past[key];
+  if (!p || !p.instant.length) return m;
+  const hit = pastCache.get(m);
+  if (hit && hit.interval === m.interval) return hit.merged; // H.interval is swapped once for the radar blend
+  const merged = { ...m, instant: [...p.instant, ...m.instant], interval: [...p.interval, ...m.interval] };
+  pastCache.set(m, { interval: m.interval, merged });
+  return merged;
 }
 
 /* ---------------- Overzicht: temperatuur per uur met weericoontjes ---------------- */
@@ -1991,10 +2011,9 @@ function dayHero(c, d) {
 }
 /* Per uur, or with `day` (a Week day) the same page for that day only: from now (today) or midnight up to the
    next midnight, without zooming, and for a later day with the day's tile instead of the tile of now. */
-function renderOverview(c, day = null) {
-  const H = needHarmonie(c); if (!H) return;
-  const now = new Date();
-  const T = tempModel();
+function renderOverview(c, day = null, now = new Date()) {
+  let H = needHarmonie(c); if (!H) return;
+  let T = tempModel();
   const o = state.obs, r0 = T.instant[0];
   if (!day || sameDay(day.day, now)) {
     const kind0 = nowKind(now);
@@ -2014,13 +2033,22 @@ function renderOverview(c, day = null) {
   } else dayHero(c, day);
 
   let span = spanFor([H]);
+  // today as a day page: the whole day from midnight, like tomorrow, with the hours before now from the
+  // forecast as computed from midnight; the dashed now line splits the two
+  const today = !!day && sameDay(day.day, now);
+  if (today) { H = withPast(H, 'harmonie'); T = withPast(T, T.key); }
   if (day) {
     const end = new Date(day.day); end.setDate(end.getDate() + 1);
-    span = { tMin: new Date(Math.max(day.day.getTime(), span.tMin.getTime())), tMax: new Date(Math.min(end.getTime(), span.tMax.getTime())) };
+    const start = today ? Math.max(day.day.getTime(), H.instant[0].t.getTime()) : Math.max(day.day.getTime(), span.tMin.getTime());
+    span = { tMin: new Date(start), tMax: new Date(Math.min(end.getTime(), span.tMax.getTime())) };
   }
   const inSpan = t => t >= span.tMin && t < span.tMax;
-  const k = card(!day ? spanTitle() : sameDay(day.day, now) ? 'Rest van vandaag' : 'Per uur', []);
+  const k = card(!day ? spanTitle() : 'Per uur', []);
   c.appendChild(k.el);
+  // the hours before now are what the model expected, not what was measured: the tooltip says so (a foot line
+  // would push the page past one screen)
+  const PAST_NOTE = ' · verwacht, niet gemeten';
+  const past = t => today && t < state.forecast.startHour;
   // icons and trees are thinned by index, so they start at the window's first hour
   const icons = hourIcons(H).filter(ic => !day || inSpan(ic.hour));
   const pts = T.instant.map(r => ({ t: r.t, tEnd: new Date(r.t.getTime() + HOUR), v: r.temperature_2m, row: r }));
@@ -2030,7 +2058,7 @@ function renderOverview(c, day = null) {
     ...span, noZoom: !!day, unit: '°C', unitTip: '°C', ticks: 'days', now, yOpts: { minSpan: 8, targetTicks: 4 }, icons, trees, height: 240,
     series: [{ kind: 'line', name: 'Temperatuur', color: 'var(--s2)', colorAt: tempColor, points: pts.map(p => ({ t: p.t, v: p.v, row: p.row })), smooth: 'soft', area: true, areaOpacity: 0.16 }],
     fmt: v => fmtNum(v, 0), directLabels: 'minmax', tipTime: p => fmtDayTime(p.t),
-    tipNote: (s, p) => { const ic = iconFor(p); const iv = H.interval.find(q => q.t.getTime() === p.t.getTime()); return (ic ? ` · ${ic.kind === 'clear' && ic.night ? 'helder' : ICON_WORDS[ic.kind]}` : '') + (iv && iv.precipitation >= 0.1 ? ` · ${fmtMm(iv.precipitation)} mm` : ''); },
+    tipNote: (s, p) => { const ic = iconFor(p); const iv = H.interval.find(q => q.t.getTime() === p.t.getTime()); return (ic ? ` · ${ic.kind === 'clear' && ic.night ? 'helder' : ICON_WORDS[ic.kind]}` : '') + (iv && iv.precipitation >= 0.1 ? ` · ${fmtMm(iv.precipitation)} mm` : '') + (past(p.t) ? PAST_NOTE : ''); },
     aria: 'Temperatuur per uur met weericoontjes',
   });
   const sub = h('div', 'chart sub');
@@ -2039,6 +2067,7 @@ function renderOverview(c, day = null) {
   drawChart(sub, { sky: skyOf(), group: 'overview', compact: true,
     ...span, noZoom: !!day, unit: 'mm', unitTip: 'mm', ticks: 'days', now, yOpts: { zero: true, minSpan: 1, headroom: 1.15 }, height: 78,
     series: [{ kind: 'bar', name: 'Neerslag', color: 'var(--s1)', points: rain }], fmt: fmtMm, tipTime: p => `${fmtWd(p.t)} ${fmtHourRange(p.t)}`,
+    tipNote: (s, p) => (past(p.t) ? PAST_NOTE : ''),
     aria: 'Neerslag per uur',
   });
   k.tableHost.appendChild(dataTable(H.instant.filter(r => !day || inSpan(r.t)), [{ label: 'Uur', get: p => fmtDayTime(p.t) }, { label: '°C', num: true, get: p => { const r = rowAt(T, p.t); return r && r.temperature_2m != null ? fmtNum(r.temperature_2m, 0) : '–'; } }, { label: 'Weer', get: p => { const ic = icons.find(i => i.hour.getTime() === p.t.getTime()); return ic ? (ic.kind === 'clear' && ic.night ? 'helder' : ICON_WORDS[ic.kind]) : ''; } }, { label: 'mm', num: true, get: p => { const iv = H.interval.find(q => q.t.getTime() === p.t.getTime()); return iv ? fmtNum(iv.precipitation, 1) : '–'; } }]));
@@ -2243,7 +2272,7 @@ function renderInfo(c) {
     c.lastChild.querySelector('p').className = 'err';
   }
   sec('Wat je ziet', [
-    'De app toont de verwachting voor de gekozen plaats. <b>Overzicht</b> draagt de naam van de plaats (tik erop om een andere te kiezen) en begint met het weer van nu: de temperatuur, het weerbeeld, hoe koud het voelt en de laagste en hoogste temperatuur van vandaag. Daaronder de regenregel: hoe lang het droog blijft, of wanneer het gaat regenen; komt er regen aan, dan kleurt de regel blauw met een mini-radar per 5 minuten. Daaronder het weer per uur en de komende zeven dagen, met per dag het weerbeeld, de laagste en hoogste temperatuur en de kans op regen. Tik op de regenbalk voor <b>Regen</b> (de radar voor de komende 2 uur en de neerslag per uur met de kans op regen) en op de uurstrook voor <b>Per uur</b>, dat temperatuur en weerbeeld per uur naast elkaar zet. Tik op een dag in de lijst voor dezelfde pagina voor alleen die dag; voor de dagen na morgen komt die uit het ECMWF-ensemble: de lijn is de middelste van de 51 berekeningen en de band laat zien waar 90% van de berekeningen zit (de 5% hoogste en de 5% laagste vallen erbuiten, zoals de lichte band van de KNMI-pluim), voor temperatuur én regen; bij regen noemt de tooltip die band gewoon als "0,0 tot 0,4 mm", omdat de middelste waarde bij buien bijna altijd 0 is, en de boompjes tonen de wind van de middelste berekening; "‹ Overzicht" brengt je terug. <b>Temperatuur</b>, <b>Wind</b> en <b>Bewolking</b> tonen elk hun eigen verloop.',
+    'De app toont de verwachting voor de gekozen plaats. <b>Overzicht</b> draagt de naam van de plaats (tik erop om een andere te kiezen) en begint met het weer van nu: de temperatuur, het weerbeeld, hoe koud het voelt en de laagste en hoogste temperatuur van vandaag. Daaronder de regenregel: hoe lang het droog blijft, of wanneer het gaat regenen; komt er regen aan, dan kleurt de regel blauw met een mini-radar per 5 minuten. Daaronder het weer per uur en de komende zeven dagen, met per dag het weerbeeld, de laagste en hoogste temperatuur en de kans op regen. Tik op de regenbalk voor <b>Regen</b> (de radar voor de komende 2 uur en de neerslag per uur met de kans op regen) en op de uurstrook voor <b>Per uur</b>, dat temperatuur en weerbeeld per uur naast elkaar zet. Tik op een dag in de lijst voor dezelfde pagina voor alleen die dag (vandaag de hele dag vanaf middernacht, met een stippellijn op nu; de uren daarvoor zijn wat het model verwachtte, geen metingen); voor de dagen na morgen komt die uit het ECMWF-ensemble: de lijn is de middelste van de 51 berekeningen en de band laat zien waar 90% van de berekeningen zit (de 5% hoogste en de 5% laagste vallen erbuiten, zoals de lichte band van de KNMI-pluim), voor temperatuur én regen; bij regen noemt de tooltip die band gewoon als "0,0 tot 0,4 mm", omdat de middelste waarde bij buien bijna altijd 0 is, en de boompjes tonen de wind van de middelste berekening; "‹ Overzicht" brengt je terug. <b>Temperatuur</b>, <b>Wind</b> en <b>Bewolking</b> tonen elk hun eigen verloop.',
     'Zoomen: spreid twee vingers op een grafiek om in te zoomen, knijp ze samen om weer verder vooruit te kijken (tot 48 uur). De grafiek begint altijd bij nu; de titel van de kaart toont hoeveel uur je ziet en de keuze wordt onthouden. Sleep met één vinger over een grafiek om de waarden van dat moment te zien; de stippellijn volgt je vinger.',
     'De achtergrond van elke grafiek volgt de zon: warm bij daglicht, grijzer naarmate er meer bewolking is, donker in de nacht, met schemer ertussen. De zonnetjes boven de grafiek staan op zonsopkomst en -ondergang en tonen het weerbeeld van dat moment.',
     'Het <b>weerbeeld</b> van een verwacht uur (zonnig, half bewolkt, dunne bewolking, bewolkt, regen) komt uit de bewolking van het model: minder dan 30% is zonnig, 30 tot 70% half bewolkt. Is de lucht (bijna) dicht, dan kijkt de app hoeveel zon er nog doorkomt, vergeleken met een heldere hemel: veel zon betekent losse wolken (half bewolkt), een flink deel betekent een sluier van dunne, hoge wolken (dunne bewolking: zon boven drie strepen) en weinig zon een dik wolkendek (bewolkt). Bij lage zon en \'s nachts beslissen de lagen: alleen hoge wolken is dunne bewolking. Vanaf 0,1 mm in het uur is het regen. Het weerbeeld van nu in de tegel komt uit de metingen.',
@@ -2914,6 +2943,19 @@ function runTests() {
       eq(document.querySelector('.tab[aria-pressed="true"]').dataset.tab, 'overview');
       page.querySelector('.back-link').click(); eq(state.tab, 'overview');
     } finally { state.forecast = saved.f; state.obs = saved.o; state.ens = saved.e; state.ecmwf = saved.c; state.tab = saved.t; state.day = saved.d; render(); }
+  });
+  test('dagpagina vandaag toont de hele dag vanaf middernacht, met de streep van nu', () => {
+    const saved = { f: state.forecast, o: state.obs, e: state.ens };
+    try {
+      state.forecast = withDays(mkJson(), NOW, 52.37, 4.9); state.obs = null; state.ens = null;
+      const past = state.forecast.past.harmonie;
+      eq(past.instant.length, 20, 'de 20 uren van 00:00 tot 20:00'); eq(past.instant[0].t.getHours(), 0);
+      eq(withPast(state.forecast.models.harmonie, 'harmonie').instant.length, past.instant.length + state.forecast.models.harmonie.instant.length);
+      const host = h('div'); renderOverview(host, state.forecast.days[0], new Date(NOW));
+      const rows = host.querySelectorAll('.card table tbody tr');
+      eq(rows[0].cells[0].textContent, fmtDayTime(new Date(2026, 9, 31, 0)), 'begint om middernacht'); eq(rows.length, 24, 'hele dag');
+      ok(host.querySelector('.now-tick').textContent === fmtTime(new Date(NOW)), 'streep van nu met tijd');
+    } finally { state.forecast = saved.f; state.obs = saved.o; state.ens = saved.e; }
   });
   test('overzicht: tik op een ECMWF-dag opent Per uur uit het ensemble: mediaan met band, boompjes, eigen dagtegel', () => {
     const saved = { f: state.forecast, o: state.obs, e: state.ens, c: state.ecmwf, t: state.tab, d: state.day };

@@ -230,3 +230,9 @@ Op dezelfde branch als versie 21 (`ux/v20-snelle-winst`). Keuzes van Ima: richti
 - **Uurstrook:** "Nu" vetgedrukt; zon op en zon onder als eigen vakje na het uur waarin ze vallen (tijd, zon op de horizon met pijl, "op"/"onder"), zoals Apple Weer.
 - **Eén scherm:** dagrijen 44 px (was 48), 12 px tussen de kaarten op Overzicht (was 14), de kop "Komende dagen" klein en in hoofdletters zoals in Apple Weer. Nagemeten op 393 × 852 met de marges van statusbalk (59 px) en thuisbalk (34 px): Overzicht scrollt niet.
 - Zelftests: 78 (nieuw: kop, kaart van nu, zoncellen, zonregel per pagina). `hourStrip` krijgt het tijdstip van nu als parameter, zodat de test met vaste data de zoncellen kan controleren.
+
+## Versie 22, aanvulling: Vandaag als hele dag
+
+- Een tik op "Vandaag" in de weeklijst toont, net als bij Morgen, de hele dag van 00:00 tot 24:00, met de stippellijn op nu. Eerder begon die pagina bij het huidige uur, zodat er 's avonds nog maar een uur of twee overbleef.
+- De uren vóór nu komen uit dezelfde HARMONIE- en ICON-D2-run, ingelezen vanaf middernacht (`withDays` bewaart ze als `forecast.past`, `withPast` zet ze voor het model). Het is dus wat het model voor die uren verwachtte, geen meting; de tooltip zegt dat ("verwacht, niet gemeten"). Een voetregel paste niet meer op één scherm. De luchttint gebruikt die uren ook.
+- Kaarttitel "Per uur" (was "Rest van vandaag"). Zelftests: 79.
