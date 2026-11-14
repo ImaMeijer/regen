@@ -169,7 +169,7 @@ a { color: var(--label-2); }
   }
 }
 .screen {
-  position: absolute; inset: 0; z-index: 2;
+  position: absolute; inset: 0; z-index: 3;
   background: var(--bg); /* only until the first render: every page is glass over the sky (.screen.sky) */
   overflow-y: auto; overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
@@ -313,13 +313,23 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
    over it (while going back) is a picture of the screen as it stood: .snap, made in app.js (snapPage).
    The page on top follows the finger or slides, with a soft edge on its left. */
 .screen.swiping, .screen.sliding { will-change: transform; } /* no edge or shadow: pages are glass, only their content moves over the sky */
-.screen.settling { transition: transform var(--dur-page) var(--ease), opacity var(--dur-page) var(--ease); }
-.screen.snap { z-index: 1; scroll-behavior: auto; pointer-events: none; will-change: transform, opacity; }
-.screen.snap.over { z-index: 3; }
+.screen.settling { transition: transform var(--dur-page) var(--ease); }
+/* no opacity (and no will-change: opacity) on a page, ever: it switches off the blur of the glass cards on it */
+.screen.snap { z-index: 2; scroll-behavior: auto; pointer-events: none; will-change: transform; }
+.screen.snap.over { z-index: 4; }
+.screen { transform-origin: 50% 0; } /* Overzicht gets smaller from its top edge, as a picture and as the live page */
+/* the dim layer between Overzicht and a sheet */
+.scrim { position: absolute; inset: 0; z-index: 1; background: rgba(4, 8, 22, 0.42); opacity: 0; pointer-events: none; }
+.phone.has-sheet .scrim { opacity: 1; }
+.scrim.settling { transition: opacity var(--dur-page) var(--ease); }
 /* Branch ux/blad-van-onder: every page but Overzicht is a sheet of glass that rises from the bottom, as in
    Apple Weer. Overzicht stays behind it (its picture, .snap.behind): a little smaller and dimmer, its top
    in sight above the sheet. The sheet itself blurs what is behind it, so its cards need no blur of their own. */
-.screen.snap.behind { z-index: 0; transform: scale(0.93); transform-origin: 50% 0; opacity: 0.45; border-radius: 24px; }
+.screen.snap.behind { z-index: 0; transform: scale(0.93); }
+/* its header is out of sight behind a sheet (the sheet's top edge would cut the place name in half) and comes
+   back with the finger while the sheet is dragged down (--top-op, set in app.js) */
+.screen.snap.behind .top { opacity: var(--top-op, 0); }
+.screen.snap.behind.settling .top { transition: opacity var(--dur-page) var(--ease); }
 .screen.sky.sheetpage {
   top: calc(max(env(safe-area-inset-top), 14px) + 10px);
   border-radius: 28px 28px 0 0;

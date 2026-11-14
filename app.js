@@ -2852,7 +2852,7 @@ function skyUpdate() {
     FX.col = col;
   }
   FX.rectsAt = -1;
-  FX.dimTo = state.tab === 'overview' ? 0 : 0.18; // the sheet has a tint of its own: the sky behind it only steps back a little
+  FX.dimTo = 0; // the sky is never dimmed here: #scrim dims what is behind a sheet, and the sheet has a tint of its own
   if (skyStill()) FX.dim = FX.dimTo;
   skyDraw(); skyKick();
 }
@@ -2907,13 +2907,22 @@ function popTo(depth) {
 /* Branch ux/blad-van-onder: a page opens as a sheet of glass that rises from the bottom, as in Apple Weer.
    Overzicht stays where it is behind it: its picture (the snap taken when the first sheet opened), a little
    smaller and dimmer, kept in the document for as long as a sheet is open. */
-const BEHIND = { scale: 0.93, dim: 0.45 };
-const behindAt = p => ({ transform: `scale(${BEHIND.scale + (1 - BEHIND.scale) * p})`, opacity: String(BEHIND.dim + (1 - BEHIND.dim) * p) }); // p: 0 behind a sheet, 1 in full view
+const BEHIND = { scale: 0.93 };
+/* Overzicht behind a sheet only gets smaller. It is dimmed by a layer of its own between it and the sheet
+   (#scrim), never by its own opacity: a page that is not fully opaque loses the blur of its glass cards
+   (they would show the stars sharp, straight through the card). */
+const behindAt = p => ({ transform: `scale(${BEHIND.scale + (1 - BEHIND.scale) * p})` }); // p: 0 behind a sheet, 1 in full view
+function scrimEl() {
+  let el = $('scrim');
+  if (!el) { el = h('div', 'scrim'); el.id = 'scrim'; el.setAttribute('aria-hidden', 'true'); $('phone').insertBefore(el, $('screen')); }
+  return el;
+}
 function behindSync() {
   const want = nav.stack.length ? nav.stack[0].snap || null : null;
-  if (nav.behind && nav.behind !== want) { nav.behind.el.remove(); nav.behind.el.classList.remove('behind', 'settling'); nav.behind.el.style.transform = ''; nav.behind.el.style.opacity = ''; }
+  if (nav.behind && nav.behind !== want) { nav.behind.el.remove(); nav.behind.el.classList.remove('behind', 'settling'); nav.behind.el.style.transform = ''; nav.behind.el.style.removeProperty('--top-op'); }
   nav.behind = want;
   if (want) { want.el.classList.add('behind'); if (!want.el.isConnected) mountSnap(want, false); }
+  scrimEl(); $('phone').classList.toggle('has-sheet', nav.stack.length > 0);
 }
 /* Transitions: pages are stacked, as in an iPhone app. A page that opens slides in from the right over the
    full width, over the page you came from, which stays where it is (a little to the left, a little dimmer).
@@ -2956,7 +2965,12 @@ function slide(top, under, opening, cleanup) {
   phone.classList.add('navving'); top.classList.add('sliding');
   skyKick();
   const anims = [top.animate(opening ? tf : tf.reverse(), opts)];
-  if (under) anims.push(under.animate(opening ? uf : uf.reverse(), opts));
+  if (under) { // the first sheet opening or the last one closing: Overzicht moves, and the dim layer over it comes or goes
+    const df = [{ opacity: 0 }, { opacity: 1 }];
+    anims.push(under.animate(opening ? uf : uf.reverse(), opts), scrimEl().animate(opening ? df : df.reverse(), opts));
+    // its header fades away: the top edge of the sheet would cut the place name in half (only the header, so the cards keep their blur)
+    const tp = under.querySelector('.top'); if (tp) anims.push(tp.animate(opening ? df.slice().reverse() : df, opts));
+  }
   let done = false;
   const finish = () => {
     if (done) return; done = true; clearTimeout(timer);
@@ -2999,7 +3013,7 @@ window.addEventListener('popstate', e => { if (Date.now() - edgeTouch < 800) MOT
    while it is scrolled to its top. In the browser as well: Safari has no gesture of its own for this.
    (swipe.dx is how far the sheet has been pulled down, swipe.w the height of the phone.) */
 const swipe = { on: false, engaged: false, x0: 0, y0: 0, t0: 0, dx: 0, w: 0, under: null };
-const swipeUnder = p => { if (nav.stack.length === 1 && nav.behind) Object.assign(nav.behind.el.style, behindAt(p)); };
+const swipeUnder = p => { if (nav.stack.length === 1 && nav.behind) { Object.assign(nav.behind.el.style, behindAt(p)); nav.behind.el.style.setProperty('--top-op', String(p)); scrimEl().style.opacity = String(1 - p); } };
 function swipeStart(x, y, t) {
   swipe.on = false;
   if (!nav.stack.length || !$('sheet').hidden || $('screen').scrollTop > 0) return false;
@@ -3022,9 +3036,11 @@ function swipeMove(x, y) {
     swipe.under = nav.stack.length > 1 ? nav.stack[nav.stack.length - 1].snap || null : null; // a sheet over a sheet: the one below; else Overzicht is there already
     if (swipe.under) { swipe.under.el.classList.remove('settling'); mountSnap(swipe.under, false); }
     if (nav.behind) nav.behind.el.classList.remove('settling');
+    scrimEl().classList.remove('settling');
     $('screen').classList.add('swiping');
     skyKick();
   }
+  FX.rectsAt = -1; // the rain keeps landing on the top edge of the sheet while it moves
   swipe.dx = Math.max(0, dy - 10);
   $('screen').style.transform = `translateY(${swipe.dx}px)`;
   swipeUnder(Math.min(1, swipe.dx / Math.max(1, swipe.w)));
@@ -3035,7 +3051,9 @@ function swipeFinish(back) {
   if (back) { MOTION.quiet = true; goBack(); } // the sheet already went down with the finger; the live page takes the picture's place
   s.classList.remove('swiping', 'settling'); s.style.transform = '';
   if (under) { under.el.remove(); under.el.classList.remove('settling'); }
-  if (nav.behind) { nav.behind.el.classList.remove('settling'); nav.behind.el.style.transform = ''; nav.behind.el.style.opacity = ''; }
+  if (nav.behind) { nav.behind.el.classList.remove('settling'); nav.behind.el.style.transform = ''; nav.behind.el.style.removeProperty('--top-op'); }
+  const sc = scrimEl(); sc.classList.remove('settling'); sc.style.opacity = '';
+  FX.rectsAt = -1;
 }
 /* far enough (28 % of the height) or a quick flick closes the sheet; otherwise it springs back into place */
 function swipeEnd(t, instant) {
@@ -3045,7 +3063,7 @@ function swipeEnd(t, instant) {
   const back = swipe.dx > swipe.w * 0.28 || (swipe.dx > 40 && swipe.dx / Math.max(1, t - swipe.t0) > 0.5);
   const s = $('screen');
   if (instant || matchMedia('(prefers-reduced-motion: reduce)').matches) { swipeFinish(back); return back; }
-  s.classList.add('settling'); if (nav.behind) nav.behind.el.classList.add('settling');
+  s.classList.add('settling'); if (nav.behind) nav.behind.el.classList.add('settling'); scrimEl().classList.add('settling');
   s.style.transform = back ? `translateY(${swipe.w}px)` : '';
   swipeUnder(back ? 1 : 0);
   let done = false;
@@ -3147,6 +3165,7 @@ function ptrCancel() { if (ptr.engaged) ptrHide(); ptr.on = false; ptr.engaged =
 
 $('infoBtn').addEventListener('click', () => openPage('info'));
 $('backBtn').addEventListener('click', goBackOrHome);
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && nav.stack.length && $('sheet').hidden) goBack(); }); // Esc closes a sheet, as it closes a dialog
 function openSheet() { $('sheet').hidden = false; $('sheetBackdrop').hidden = false; $('results').textContent = ''; $('q').value = ''; setTimeout(() => $('q').focus(), 50); }
 function closeSheet() { $('sheet').hidden = true; $('sheetBackdrop').hidden = true; }
 $('locBtn').addEventListener('click', openSheet);

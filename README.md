@@ -351,3 +351,9 @@ Proefversie om te vergelijken met versie 30 op main (pagina's die van rechts ins
 - **Sluiten:** "‹ Overzicht", of het blad omlaag slepen (vanaf elke plek, zolang het blad bovenaan staat): het volgt de vinger en het Overzicht komt mee naar voren; voorbij 28% van de hoogte of met een snelle veeg sluit het, anders veert het terug. Dit vervangt de veeg vanaf de linkerrand, en op een blad ook trekken-om-te-verversen (dat blijft op Overzicht).
 - **Regen spat op de bovenrand van het blad** in plaats van op de kaarten.
 - Cache `regen-v31-blad`. Zelftests: 89 (de veegtest is nu een test van het omlaag slepen).
+- **QA-ronde (na feedback van Ima):**
+  - Bij het omlaag slepen waren de sterren scherp door de kaarten van het Overzicht heen te zien, tot het blad beneden was. Oorzaak: het Overzicht werd gedimd met `opacity`, en een pagina die niet volledig dekkend is verliest de vervaging (`backdrop-filter`) van haar kaarten. Nu dimt een eigen laag tussen Overzicht en blad (`#scrim`); een pagina krijgt nooit meer `opacity` of `will-change: opacity`.
+  - Het Overzicht verkleinde als kopie vanaf de bovenrand en als echte pagina vanuit het midden: een sprongetje bij het wisselen. Nu overal vanaf de bovenrand; de ronde hoeken van de kopie zijn weg (die verdwenen bij het wisselen ineens).
+  - De plaatsnaam van het Overzicht werd door de bovenrand van het blad doormidden gesneden. De kop vervaagt nu bij het openen en komt met de vinger terug bij het slepen.
+  - De lucht zelf wordt achter een blad niet meer apart gedimd (dat deed de dimlaag dubbel).
+  - Regen blijft op de rand van het blad spatten terwijl het beweegt; Esc sluit een blad.
