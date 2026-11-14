@@ -169,7 +169,7 @@ a { color: var(--label-2); }
   }
 }
 .screen {
-  position: absolute; inset: 0; z-index: 1;
+  position: absolute; inset: 0; z-index: 2;
   background: var(--bg); /* only until the first render: every page is glass over the sky (.screen.sky) */
   overflow-y: auto; overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
@@ -314,8 +314,27 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
    The page on top follows the finger or slides, with a soft edge on its left. */
 .screen.swiping, .screen.sliding { will-change: transform; } /* no edge or shadow: pages are glass, only their content moves over the sky */
 .screen.settling { transition: transform var(--dur-page) var(--ease), opacity var(--dur-page) var(--ease); }
-.screen.snap { z-index: 0; scroll-behavior: auto; pointer-events: none; will-change: transform, opacity; }
-.screen.snap.over { z-index: 2; }
+.screen.snap { z-index: 1; scroll-behavior: auto; pointer-events: none; will-change: transform, opacity; }
+.screen.snap.over { z-index: 3; }
+/* Branch ux/blad-van-onder: every page but Overzicht is a sheet of glass that rises from the bottom, as in
+   Apple Weer. Overzicht stays behind it (its picture, .snap.behind): a little smaller and dimmer, its top
+   in sight above the sheet. The sheet itself blurs what is behind it, so its cards need no blur of their own. */
+.screen.snap.behind { z-index: 0; transform: scale(0.93); transform-origin: 50% 0; opacity: 0.45; border-radius: 24px; }
+.screen.sky.sheetpage {
+  top: calc(max(env(safe-area-inset-top), 14px) + 10px);
+  border-radius: 28px 28px 0 0;
+  background: rgba(13, 21, 40, 0.5);
+  -webkit-backdrop-filter: blur(30px) saturate(1.6); backdrop-filter: blur(30px) saturate(1.6);
+  box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.28), inset 0 0 0 0.5px rgba(255, 255, 255, 0.1), 0 -14px 44px rgba(0, 0, 20, 0.28);
+  --card: rgba(255, 255, 255, 0.085);
+}
+.screen.sky.sheetpage .card, .screen.sky.sheetpage .hero, .screen.sky.sheetpage .stat { -webkit-backdrop-filter: none; backdrop-filter: none; }
+.screen.sky.sheetpage .top { padding-top: 24px; text-shadow: none; }
+.screen.sky.sheetpage .top::before { /* the grabber: this sheet can be pulled down */
+  content: ""; position: absolute; left: 50%; top: 8px; width: 36px; height: 5px; margin-left: -18px;
+  border-radius: 3px; background: rgba(255, 255, 255, 0.36);
+}
+.screen.sky.sheetpage .info-btn { top: 24px; }
 .phone.navving .screen { pointer-events: none; } /* no taps on a page that is still sliding */
 
 /* ---------- week ---------- */

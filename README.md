@@ -341,3 +341,13 @@ Op verzoek van Ima: de achtergrond verdween zodra je iets opende.
 - `skyPalette` en `cloudGrey` lezen de kleuren nu van het scherm (`tokenStyle`), niet van de pagina als geheel.
 - De animatie loopt nu op elke pagina zolang de app zichtbaar is.
 - Cache v30. Zelftests: 89 (aangepast: de lucht blijft achter Wind, met witte tekst).
+
+## Branch `ux/blad-van-onder`: een pagina als glazen blad van onder
+
+Proefversie om te vergelijken met versie 30 op main (pagina's die van rechts inschuiven). Op verzoek van Ima, naar Apple Weer.
+
+- **Blad:** elke pagina behalve Overzicht (`.screen.sheetpage`) is een blad van glas met ronde bovenhoeken en een greepje, dat van de onderrand omhoog komt (500 ms). Het blad vervaagt wat erachter ligt; de kaarten erop hebben daarom geen eigen vervaging meer.
+- **Overzicht blijft erachter staan (`behindSync`, `.snap.behind`):** de kopie van het Overzicht blijft in beeld zolang er een blad open is, iets kleiner (93%) en gedimd, met de bovenkant zichtbaar boven het blad. Een blad op een blad (Info vanaf een dag) komt er op dezelfde manier overheen.
+- **Sluiten:** "‹ Overzicht", of het blad omlaag slepen (vanaf elke plek, zolang het blad bovenaan staat): het volgt de vinger en het Overzicht komt mee naar voren; voorbij 28% van de hoogte of met een snelle veeg sluit het, anders veert het terug. Dit vervangt de veeg vanaf de linkerrand, en op een blad ook trekken-om-te-verversen (dat blijft op Overzicht).
+- **Regen spat op de bovenrand van het blad** in plaats van op de kaarten.
+- Cache `regen-v31-blad`. Zelftests: 89 (de veegtest is nu een test van het omlaag slepen).

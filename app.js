@@ -1298,6 +1298,7 @@ function render() {
   // UX-audit C2: the sky of now behind the header of Overzicht
   // v30: every page is glass over the living sky (app.css, .screen.sky), not only Overzicht
   screen.classList.add('sky');
+  screen.classList.toggle('sheetpage', sub); // branch ux/blad-van-onder: every page but Overzicht is a sheet of glass
   if (placeTitle) screen.style.setProperty('--sky-now', skyNow()); else screen.style.removeProperty('--sky-now');
   const keepScroll = screen.scrollTop; // rebuilding the content must not move the page
   const minH = c.offsetHeight; c.style.minHeight = minH + 'px';
@@ -1312,6 +1313,7 @@ function render() {
   } finally {
     c.style.minHeight = '';
     if (screen.scrollTop !== keepScroll) screen.scrollTop = keepScroll;
+    try { behindSync(); } catch (e) {} // Overzicht behind an open sheet, and gone again without one
     try { skyUpdate(); } catch (e) {} // the living sky behind Overzicht follows the weather; never in the way of the page
   }
 }
@@ -2666,7 +2668,8 @@ function skyBuild() {
 /* the top edges of the cards, in canvas coordinates: where rain splashes and snow settles */
 function skyRects() {
   FX.rectsAt = FX.t;
-  const p = $('phone').getBoundingClientRect();
+  const p = $('phone').getBoundingClientRect(), s = $('screen');
+  if (s.classList.contains('sheetpage')) { const r = s.getBoundingClientRect(); FX.rects = [{ l: r.left - p.left + 22, r: r.right - p.left - 22, t: r.top - p.top }]; return; } // rain lands on the top edge of the sheet
   FX.rects = [...$('content').querySelectorAll('.card, .hero, .stat')].map(el => { const r = el.getBoundingClientRect(); return { l: r.left - p.left + 12, r: r.right - p.left - 12, t: r.top - p.top }; }).filter(r => r.t > 0 && r.t < FX.h);
 }
 const fxHit = (x, y0, y1) => { for (const r of FX.rects) if (x > r.l && x < r.r && y0 < r.t && y1 >= r.t) return r; return null; };
@@ -2849,7 +2852,7 @@ function skyUpdate() {
     FX.col = col;
   }
   FX.rectsAt = -1;
-  FX.dimTo = SKY_DIM[state.tab] != null ? SKY_DIM[state.tab] : 0.4;
+  FX.dimTo = state.tab === 'overview' ? 0 : 0.18; // the sheet has a tint of its own: the sky behind it only steps back a little
   if (skyStill()) FX.dim = FX.dimTo;
   skyDraw(); skyKick();
 }
@@ -2878,8 +2881,13 @@ function openPage(tab, day) {
   const snap = snapPage(); // the page we leave stays as a picture: under the new page now, under the swipe later
   nav.stack.push({ tab: state.tab, day: state.day, scroll: $('screen').scrollTop, title: state.tab === 'overview' ? TABS.overview : $('title').textContent, snap }); // Overzicht's title is the place: back says where in the app
   state.tab = tab; if (day !== undefined) state.day = day;
+  const root = nav.stack.length === 1;
   toTop(); render();
-  if (motionOk()) { mountSnap(snap, false); slide($('screen'), snap.el, true, () => snap.el.remove()); }
+  behindSync(); // Overzicht stays in sight behind the sheet
+  if (motionOk()) {
+    if (root) slide($('screen'), snap.el, true, () => {});
+    else { mountSnap(snap, false); slide($('screen'), null, true, () => snap.el.remove()); } // a sheet over a sheet: the one below just stays until it is covered
+  }
   if (useHistory) try { history.pushState({ regenDepth: nav.stack.length }, ''); } catch (e) {}
 }
 function popTo(depth) {
@@ -2891,8 +2899,21 @@ function popTo(depth) {
   const out = !quiet && motionOk() ? snapPage() : null; // the page we leave slides away as a picture, over the live one
   state.tab = prev.tab; state.day = prev.day;
   render(); scrollJump(prev.scroll);
-  if (out) { mountSnap(out, true); slide(out.el, $('screen'), false, () => out.el.remove()); }
+  const toRoot = !nav.stack.length;
+  behindSync(); // back on Overzicht the live page takes the place of its picture
+  if (out) { mountSnap(out, true); slide(out.el, toRoot ? $('screen') : null, false, () => out.el.remove()); }
   return true;
+}
+/* Branch ux/blad-van-onder: a page opens as a sheet of glass that rises from the bottom, as in Apple Weer.
+   Overzicht stays where it is behind it: its picture (the snap taken when the first sheet opened), a little
+   smaller and dimmer, kept in the document for as long as a sheet is open. */
+const BEHIND = { scale: 0.93, dim: 0.45 };
+const behindAt = p => ({ transform: `scale(${BEHIND.scale + (1 - BEHIND.scale) * p})`, opacity: String(BEHIND.dim + (1 - BEHIND.dim) * p) }); // p: 0 behind a sheet, 1 in full view
+function behindSync() {
+  const want = nav.stack.length ? nav.stack[0].snap || null : null;
+  if (nav.behind && nav.behind !== want) { nav.behind.el.remove(); nav.behind.el.classList.remove('behind', 'settling'); nav.behind.el.style.transform = ''; nav.behind.el.style.opacity = ''; }
+  nav.behind = want;
+  if (want) { want.el.classList.add('behind'); if (!want.el.isConnected) mountSnap(want, false); }
 }
 /* Transitions: pages are stacked, as in an iPhone app. A page that opens slides in from the right over the
    full width, over the page you came from, which stays where it is (a little to the left, a little dimmer).
@@ -2900,7 +2921,7 @@ function popTo(depth) {
    motion, and nothing after the edge swipe, which has already moved the page with the finger.
    The page that is not live is a picture of it: a copy of the screen as it stood (snapPage), with its scroll
    positions, that cannot be touched. So render() keeps drawing into the one live screen. */
-const MOTION = { page: 220, fast: 150, ease: 'cubic-bezier(.2,.8,.2,1)', push: 420, pushEase: 'cubic-bezier(.32,.72,0,1)', quiet: false }; // = --dur-page, --dur-fast, --ease, --dur-push and --ease-push in app.css
+const MOTION = { page: 220, fast: 150, ease: 'cubic-bezier(.2,.8,.2,1)', push: 500, pushEase: 'cubic-bezier(.32,.72,0,1)', quiet: false }; // = --dur-page, --dur-fast, --ease, --dur-push and --ease-push in app.css
 const UNDER = { shift: 30, dim: 0 }; // the page underneath: 30 % to the left and faded away when fully covered (pages are glass: the sky stays, the content changes)
 const motionOk = () => !matchMedia('(prefers-reduced-motion: reduce)').matches && !!$('screen').animate;
 function snapPage() {
@@ -2930,10 +2951,12 @@ let navDone = null; // finishes the slide that is running, if any
 function navSettle() { if (navDone) navDone(); }
 function slide(top, under, opening, cleanup) {
   const phone = $('phone'), opts = { duration: MOTION.push, easing: MOTION.pushEase, fill: 'both' };
-  const tf = [{ transform: 'translateX(100%)' }, { transform: 'translateX(0)' }], uf = [underAt(1), underAt(0)];
+  // the sheet rises from the bottom edge; Overzicht (its picture, or the live page when the last sheet closes) steps back or comes forward
+  const tf = [{ transform: 'translateY(100%)' }, { transform: 'translateY(0)' }], uf = [behindAt(1), behindAt(0)];
   phone.classList.add('navving'); top.classList.add('sliding');
-  skyKick(); // Overzicht may be coming into sight
-  const anims = [top.animate(opening ? tf : tf.reverse(), opts), under.animate(opening ? uf : uf.reverse(), opts)];
+  skyKick();
+  const anims = [top.animate(opening ? tf : tf.reverse(), opts)];
+  if (under) anims.push(under.animate(opening ? uf : uf.reverse(), opts));
   let done = false;
   const finish = () => {
     if (done) return; done = true; clearTimeout(timer);
@@ -2955,7 +2978,7 @@ function goBack() {
 function resetNav() {
   const n = nav.stack.length; if (!n) return;
   navSettle();
-  nav.stack = [];
+  nav.stack = []; behindSync();
   if (useHistory) try { history.go(-n); } catch (e) {}
 }
 /* the browser's own back. Safari in a tab has then already slid the page with the finger (its edge swipe):
@@ -2972,55 +2995,58 @@ window.addEventListener('popstate', e => { if (Date.now() - edgeTouch < 800) MOT
    browser tab Safari does this swipe itself, through the history entries above, and two backs would be one
    too many. ?veeg=1 switches it on in a browser, for trying it out.
    The page follows the finger and the page you go back to lies under it: the picture taken when you left it. ---- */
-const SWIPE_EDGE = 24; // px from the left edge of the app where the swipe may start
+/* Branch ux/blad-van-onder: the sheet is closed by dragging it down, as in Apple Weer, from anywhere on it
+   while it is scrolled to its top. In the browser as well: Safari has no gesture of its own for this.
+   (swipe.dx is how far the sheet has been pulled down, swipe.w the height of the phone.) */
 const swipe = { on: false, engaged: false, x0: 0, y0: 0, t0: 0, dx: 0, w: 0, under: null };
-const ownSwipe = navigator.standalone === true || new URLSearchParams(location.search).get('veeg') === '1';
-const swipeUnder = p => { if (swipe.under) Object.assign(swipe.under.el.style, underAt(p)); };
+const swipeUnder = p => { if (nav.stack.length === 1 && nav.behind) Object.assign(nav.behind.el.style, behindAt(p)); };
 function swipeStart(x, y, t) {
   swipe.on = false;
-  if (!nav.stack.length || !$('sheet').hidden) return false;
+  if (!nav.stack.length || !$('sheet').hidden || $('screen').scrollTop > 0) return false;
   const r = $('phone').getBoundingClientRect();
-  if (x - r.left > SWIPE_EDGE || x < r.left) return false;
-  Object.assign(swipe, { on: true, engaged: false, x0: x, y0: y, t0: t, dx: 0, w: r.width });
+  Object.assign(swipe, { on: true, engaged: false, x0: x, y0: y, t0: t, dx: 0, w: r.height });
   return true;
 }
-/* true when this move belongs to the swipe (then the caller stops the page from scrolling) */
+/* true when this move belongs to the drag (then the caller stops the page from scrolling) */
 function swipeMove(x, y) {
   if (!swipe.on) return false;
   const dx = x - swipe.x0, dy = y - swipe.y0;
   if (!swipe.engaged) {
-    if (Math.abs(dy) > 10 && Math.abs(dy) > dx) { swipe.on = false; return false; } // scrolling, not swiping
-    if (dx < 10) return false;
+    if (dy < -10 || (Math.abs(dx) > 10 && Math.abs(dx) > dy)) { swipe.on = false; return false; } // scrolling on, or sideways through the hours
+    if (dy < 10) return false;
+    if ($('screen').scrollTop > 0) { swipe.on = false; return false; }
     swipe.engaged = true;
     hideTooltip();
     for (const hh of document.querySelectorAll('.chart')) if (hh._scrubTo) hh._scrubTo(null);
     navSettle();
-    swipe.under = nav.stack[nav.stack.length - 1].snap || null;
+    swipe.under = nav.stack.length > 1 ? nav.stack[nav.stack.length - 1].snap || null : null; // a sheet over a sheet: the one below; else Overzicht is there already
     if (swipe.under) { swipe.under.el.classList.remove('settling'); mountSnap(swipe.under, false); }
+    if (nav.behind) nav.behind.el.classList.remove('settling');
     $('screen').classList.add('swiping');
     skyKick();
   }
-  swipe.dx = Math.max(0, dx);
-  $('screen').style.transform = `translateX(${swipe.dx}px)`;
+  swipe.dx = Math.max(0, dy - 10);
+  $('screen').style.transform = `translateY(${swipe.dx}px)`;
   swipeUnder(Math.min(1, swipe.dx / Math.max(1, swipe.w)));
   return true;
 }
 function swipeFinish(back) {
   const s = $('screen'), under = swipe.under; swipe.under = null;
-  if (back) { MOTION.quiet = true; goBack(); } // the page already slid away with the finger; the live page takes the picture's place
+  if (back) { MOTION.quiet = true; goBack(); } // the sheet already went down with the finger; the live page takes the picture's place
   s.classList.remove('swiping', 'settling'); s.style.transform = '';
-  if (under) { under.el.remove(); under.el.classList.remove('settling'); under.el.style.transform = ''; under.el.style.opacity = ''; }
+  if (under) { under.el.remove(); under.el.classList.remove('settling'); }
+  if (nav.behind) { nav.behind.el.classList.remove('settling'); nav.behind.el.style.transform = ''; nav.behind.el.style.opacity = ''; }
 }
-/* far enough (40 % of the width) or a quick flick goes back; otherwise the page slides back into place */
+/* far enough (28 % of the height) or a quick flick closes the sheet; otherwise it springs back into place */
 function swipeEnd(t, instant) {
   if (!swipe.on) return false;
   const was = swipe.engaged; swipe.on = false; swipe.engaged = false;
   if (!was) return false;
-  const back = swipe.dx > swipe.w * 0.4 || (swipe.dx > 40 && swipe.dx / Math.max(1, t - swipe.t0) > 0.5);
+  const back = swipe.dx > swipe.w * 0.28 || (swipe.dx > 40 && swipe.dx / Math.max(1, t - swipe.t0) > 0.5);
   const s = $('screen');
   if (instant || matchMedia('(prefers-reduced-motion: reduce)').matches) { swipeFinish(back); return back; }
-  s.classList.add('settling'); if (swipe.under) swipe.under.el.classList.add('settling');
-  s.style.transform = back ? `translateX(${swipe.w}px)` : '';
+  s.classList.add('settling'); if (nav.behind) nav.behind.el.classList.add('settling');
+  s.style.transform = back ? `translateY(${swipe.w}px)` : '';
   swipeUnder(back ? 1 : 0);
   let done = false;
   const finish = () => { if (done) return; done = true; s.removeEventListener('transitionend', finish); swipeFinish(back); };
@@ -3029,7 +3055,7 @@ function swipeEnd(t, instant) {
   return back;
 }
 function swipeCancel() { if (swipe.on && swipe.engaged) { swipe.on = false; swipe.engaged = false; swipeFinish(false); } else swipe.on = false; }
-if (ownSwipe) {
+{
   const phone = $('phone');
   phone.addEventListener('touchstart', e => {
     if (e.touches.length !== 1) { swipeCancel(); return; }
@@ -3063,7 +3089,7 @@ function ptrEl() {
 }
 function ptrStart(x, y) {
   ptr.on = false;
-  if (ptr.busy || $('screen').scrollTop > 0 || !$('sheet').hidden || swipe.on) return false;
+  if (ptr.busy || $('screen').scrollTop > 0 || !$('sheet').hidden || swipe.on || nav.stack.length) return false; // on a sheet, pulling down closes it
   Object.assign(ptr, { on: true, engaged: false, x0: x, y0: y, d: 0 });
   return true;
 }
@@ -3984,26 +4010,29 @@ function runTests() {
       spacer.remove(); state.forecast = saved.f; state.obs = saved.o; state.ens = saved.e; state.ecmwf = saved.c; state.tab = saved.t; state.day = saved.d; nav.stack = saved.n; render();
     }
   });
-  test('terug: vegen vanaf de linkerrand, niet vanaf het midden; kort of omhoog vegen gaat niet terug', () => {
+  test('blad: omlaag slepen sluit het blad; zijwaarts, omhoog of kort en langzaam niet; Overzicht blijft erachter staan', () => {
     const saved = { f: state.forecast, o: state.obs, e: state.ens, c: state.ecmwf, t: state.tab, d: state.day, n: nav.stack };
     try {
       state.forecast = withDays(mkJson(), NOW, 52.37, 4.9); state.obs = null; state.ens = null; state.ecmwf = null;
       nav.stack = []; state.tab = 'overview'; render();
-      const r = $('phone').getBoundingClientRect(), x = r.left + 8, y = r.top + 300;
-      ok(!swipeStart(x, y, 0), 'op een tab: niets om naar terug te gaan');
+      const r = $('phone').getBoundingClientRect(), x = r.left + 150, y = r.top + 200;
+      ok(!swipeStart(x, y, 0), 'op Overzicht: geen blad om te sluiten'); ok(!$('screen').classList.contains('sheetpage'), 'Overzicht is geen blad');
       $('content').querySelectorAll('.week-row.open')[0].click(); eq(state.tab, 'day');
-      ok(!swipeStart(r.left + 80, y, 0), 'midden van het scherm telt niet');
-      ok(swipeStart(x, y, 0)); ok(!swipeMove(x + 2, y + 30), 'omhoog/omlaag = scrollen'); ok(!swipeEnd(100, true)); eq(state.tab, 'day');
-      const start = () => { const r0 = swipeStart(x, y, 0); swipe.w = 400; return r0; }; // a 400 px wide phone, also when the page is hidden (width 0)
-      ok(start()); ok(swipeMove(x + 60, y + 4)); ok($('screen').classList.contains('swiping'));
-      const under = $('screen-snap');
-      ok(under && under.querySelector('.week-list'), 'het Overzicht ligt eronder'); ok(!under.classList.contains('over') && under.inert, 'onder de pagina, niet aan te raken');
-      eq($('title').textContent, pageTitle(), 'de kop van de pagina zelf blijft de echte'); ok(under.style.transform.includes('translateX(-'), 'iets naar links, schuift mee');
-      ok(!swipeEnd(1000, true), '60 px langzaam: blijft staan'); eq(state.tab, 'day'); eq($('screen').style.transform, ''); ok(!$('screen-snap'), 'onderlaag weer weg');
-      ok(start()); swipeMove(x + 40, y); swipeMove(x + 70, y); ok(swipeEnd(100, true), 'snelle veeg gaat terug'); eq(state.tab, 'overview');
+      ok($('screen').classList.contains('sheetpage'), 'een dag opent als blad');
+      const behind = $('screen-snap');
+      ok(behind && behind.classList.contains('behind') && behind.querySelector('.week-list'), 'het Overzicht blijft erachter staan'); ok(behind.inert, 'niet aan te raken');
+      ok(swipeStart(x, y, 0)); ok(!swipeMove(x + 30, y + 2), 'zijwaarts = door de uren vegen'); ok(!swipeEnd(100, true)); eq(state.tab, 'day');
+      ok(swipeStart(x, y, 0)); ok(!swipeMove(x, y - 30), 'omhoog = scrollen'); ok(!swipeEnd(100, true)); eq(state.tab, 'day');
+      const start = () => { const r0 = swipeStart(x, y, 0); swipe.w = 800; return r0; }; // an 800 px high phone, also when the page is hidden (height 0)
+      ok(start()); ok(swipeMove(x + 4, y + 70)); ok($('screen').classList.contains('swiping')); ok($('screen').style.transform.includes('translateY('), 'het blad volgt de vinger omlaag');
+      eq($('title').textContent, pageTitle(), 'de kop van het blad blijft de echte'); ok(behind.style.transform.includes('scale('), 'het Overzicht komt mee naar voren');
+      ok(!swipeEnd(1000, true), '60 px langzaam: blijft staan'); eq(state.tab, 'day'); eq($('screen').style.transform, ''); eq(behind.style.transform, '', 'Overzicht weer op zijn plek erachter');
+      ok(start()); swipeMove(x, y + 50); swipeMove(x, y + 80); ok(swipeEnd(100, true), 'snelle veeg omlaag sluit'); eq(state.tab, 'overview'); ok(!$('screen-snap'), 'het echte Overzicht staat er weer');
       $('content').querySelectorAll('.week-row.open')[0].click();
-      ok(start()); swipeMove(x + 200, y); ok(swipeEnd(2000, true), 'halverwege losgelaten gaat terug'); eq(state.tab, 'overview');
-      ok(!$('screen').classList.contains('swiping') && !$('screen-snap'), 'opgeruimd');
+      ok(start()); swipeMove(x, y + 300); ok(swipeEnd(2000, true), 'ver genoeg omlaag sluit'); eq(state.tab, 'overview');
+      $('content').querySelectorAll('.week-row.open')[0].click(); $('infoBtn').click(); eq(nav.stack.length, 2, 'een blad op een blad');
+      ok($('phone').querySelector('.snap.behind .week-list'), 'Overzicht nog steeds erachter'); ok(goBack()); eq(state.tab, 'day'); ok(goBack()); eq(state.tab, 'overview');
+      ok(!$('screen').classList.contains('swiping') && !$('screen').classList.contains('sheetpage'), 'opgeruimd');
       navSettle(); ok(!$('phone').querySelector('.snap'), 'geen lagen over na het schuiven');
     } finally { state.forecast = saved.f; state.obs = saved.o; state.ens = saved.e; state.ecmwf = saved.c; state.tab = saved.t; state.day = saved.d; nav.stack = saved.n; render(); }
   });
@@ -4025,7 +4054,7 @@ function runTests() {
     } finally { state.forecast = saved.f; state.obs = saved.o; state.ens = saved.e; state.ecmwf = saved.c; state.tab = saved.t; state.day = saved.d; nav.stack = saved.n; render(); }
   });
   test('v23: trekken om te verversen: alleen bovenaan, pas voorbij de drempel, niet bij zijwaarts of omhoog', () => {
-    const savedReload = ptr.reload, s = $('screen');
+    const savedReload = ptr.reload, s = $('screen'), savedNav = nav.stack; nav.stack = []; // on a sheet, pulling down closes it instead
     let calls = 0; ptr.reload = () => { calls++; return Promise.resolve(); };
     try {
       toTop();
@@ -4038,7 +4067,7 @@ function runTests() {
       ok(ptrStart(100, 200)); ok(!ptrMove(100, 180), 'omhoog = scrollen'); ok(!ptr.on);
       const spacer = h('div'); spacer.style.height = '3000px'; s.appendChild(spacer);
       try { scrollJump(200); ok(!ptrStart(100, 200), 'niet als de pagina naar beneden gescrold is'); } finally { spacer.remove(); toTop(); }
-    } finally { ptr.reload = savedReload; ptr.busy = false; ptr.on = false; ptr.engaged = false; ptrHide(); }
+    } finally { nav.stack = savedNav; ptr.reload = savedReload; ptr.busy = false; ptr.on = false; ptr.engaged = false; ptrHide(); }
   });
   test('v24: Info als vragen die dicht beginnen, met alle tekst; brontabel; Beaufort', () => {
     const saved = state.errors;
@@ -4104,7 +4133,7 @@ function runTests() {
       { const a = skyColors({ alt: 30, cloud: 0, rain: 0 }), b = skyColors({ alt: 30, cloud: 1, rain: 4 }), n = skyColors({ alt: -30, cloud: 0, rain: 0 });
         ok(a.g[0][2] > a.g[0][0] + 60, 'heldere dag is blauw'); ok(Math.abs(b.g[0][2] - b.g[0][0]) < 40, 'regenlucht is grijs'); ok(n.g[0].every(v => v < 30), 'nacht is donker');
         const s = skyScene(); ok(s.cloud >= 0 && s.cloud <= 1 && s.rain >= 0 && s.wind >= 0, 'het weer van nu als tafereel'); } ok(!document.querySelector('.tabbar, .tab'), 'geen tabbalk');
-      state.tab = 'wind'; render(); ok($('screen').classList.contains('sky') && getComputedStyle($('screen')).backgroundColor === 'rgba(0, 0, 0, 0)', 'de lucht blijft achter elke pagina'); eq(getComputedStyle($('title')).color, 'rgb(255, 255, 255)', 'ook Wind is glas met witte tekst'); ok(!$('screen').style.getPropertyValue('--sky-now'), 'luchtkleur van de kop alleen op Overzicht');
+      state.tab = 'wind'; render(); ok($('screen').classList.contains('sky') && $('screen').classList.contains('sheetpage') && getComputedStyle($('screen')).backgroundColor.startsWith('rgba('), 'de lucht blijft achter elk blad: doorzichtig glas'); eq(getComputedStyle($('title')).color, 'rgb(255, 255, 255)', 'ook Wind is glas met witte tekst'); ok(!$('screen').style.getPropertyValue('--sky-now'), 'luchtkleur van de kop alleen op Overzicht');
       state.tab = 'info'; render(); ok(!$('content').querySelector('input[type="checkbox"]'), 'geen proefschakelaar meer');
     } finally {
       state.forecast = saved.f; state.obs = saved.o; state.ens = saved.e; state.ecmwf = saved.c; state.tab = saved.t; nav.stack = saved.n;
