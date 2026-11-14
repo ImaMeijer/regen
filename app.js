@@ -1311,6 +1311,7 @@ function render() {
   } finally {
     c.style.minHeight = '';
     if (screen.scrollTop !== keepScroll) screen.scrollTop = keepScroll;
+    try { skyUpdate(); } catch (e) {} // the living sky behind Overzicht follows the weather; never in the way of the page
   }
 }
 
@@ -2498,6 +2499,359 @@ function renderWind(c) {
 }
 
 /* ======================================================================
+   4b. The living sky behind Overzicht
+   One canvas under the pages (#skyfx), drawn from the weather of now: the colour of the sky from the sun's
+   altitude, greyed by the cloud; stars, the sun with its glow, clouds drifting with the wind; rain in three
+   depths that splashes on the top edge of the cards, with drops on the glass that stick and run down; snow
+   that settles on the cards; lightning; fog. Overzicht is glass over it (app.css, .screen.sky).
+   Runs only while Overzicht is in sight; one still frame under reduced motion.
+   ?weer=helder|nacht|avond|schemer|halfbewolkt|bewolkt|regen|bui|nachtregen|sneeuw|onweer|mist|storm shows a
+   kind of weather for trying it out.
+   ====================================================================== */
+const SKY_DEMO = {
+  helder: { alt: 38, cloud: 0.04, sunP: 0.45 }, nacht: { alt: -30, cloud: 0.04 }, avond: { alt: 1.5, cloud: 0.22, sunP: 0.97 },
+  schemer: { alt: -5, cloud: 0.12 }, halfbewolkt: { alt: 30, cloud: 0.45, sunP: 0.4, wind: 14 }, bewolkt: { alt: 25, cloud: 0.95, wind: 10 },
+  regen: { alt: 20, cloud: 0.9, rain: 1.5, wind: 18 }, bui: { alt: 20, cloud: 1, rain: 8, wind: 38 }, nachtregen: { alt: -30, cloud: 0.9, rain: 2, wind: 15 },
+  sneeuw: { alt: 15, cloud: 0.9, snow: 1, wind: 8 }, onweer: { alt: 12, cloud: 1, rain: 6, thunder: true, wind: 30 },
+  mist: { alt: 10, cloud: 0.7, fog: true, wind: 3 }, storm: { alt: 25, cloud: 0.75, wind: 85 },
+};
+let skyDemo = SKY_DEMO[new URLSearchParams(location.search).get('weer')] || null;
+/* what the sky has to show now: measured where there is a reading, else the model's current hour */
+function skyScene(now = new Date()) {
+  const { lat, lon } = state.loc, o = state.obs;
+  const H = state.forecast && state.forecast.models && state.forecast.models.harmonie;
+  const r0 = H && H.instant && H.instant[0], ms = now.getTime();
+  const iv = H && H.interval ? H.interval.find(p => ms >= p.t.getTime() && ms < p.tEnd.getTime()) : null;
+  const desc = ((o && o.desc) || '').toLowerCase(), code = r0 && r0.weather_code != null ? r0.weather_code : -1;
+  const cl = o && o.sky != null ? o.sky / 100 : cloudAt(now);
+  const nc = state.nowcast && state.nowcast.length ? state.nowcast[0].v : null;
+  let rain = nc != null ? nc : iv && iv.precipitation != null ? iv.precipitation : 0;
+  let kind = 'clear'; try { kind = nowKind(now); } catch (e) {}
+  if (kind === 'rain' && rain < 0.3) rain = 0.5;
+  const snowing = /sneeuw/.test(desc) || (iv && iv.snowfall > 0) || (code >= 71 && code <= 77) || code === 85 || code === 86;
+  const day0 = new Date(now); day0.setHours(0, 0, 0, 0);
+  let sunP = 0.5;
+  try {
+    const ev = solarEvents(day0, new Date(day0.getTime() + 24 * HOUR), lat, lon);
+    const up = ev.find(e => e.kind === 'sunrise'), dn = ev.find(e => e.kind === 'sunset');
+    if (up && dn) sunP = clamp((ms - up.t.getTime()) / (dn.t.getTime() - up.t.getTime()), 0, 1);
+  } catch (e) {}
+  const sc = {
+    alt: sunAltitude(now, lat, lon), sunP,
+    cloud: clamp(cl != null ? cl : kind === 'clear' ? 0.1 : kind === 'partly' || kind === 'thin' ? 0.45 : 0.9, 0, 1),
+    rain: snowing ? 0 : rain, snow: snowing ? Math.max(0.5, rain) : 0,
+    thunder: /onweer/.test(desc) || code >= 95, fog: /mist|nevel/.test(desc) || code === 45 || code === 48,
+    wind: o && o.wind != null ? o.wind : r0 && r0.wind_speed_10m != null ? r0.wind_speed_10m : 8,
+    dir: o && o.wind != null && o.dir != null ? o.dir : r0 && r0.wind_direction_10m != null ? r0.wind_direction_10m : 250,
+  };
+  if (sc.rain > 0 || sc.snow > 0) sc.cloud = Math.max(sc.cloud, 0.8);
+  return skyDemo ? Object.assign(sc, { rain: 0, snow: 0, thunder: false, fog: false, wind: 8 }, skyDemo) : sc;
+}
+/* sky from top to bottom at a sun altitude (degrees); in between is mixed */
+const SKY_KEYS = [
+  [-18, [4, 6, 16], [9, 13, 34], [20, 26, 58]],
+  [-8, [10, 16, 44], [28, 34, 80], [72, 62, 112]],
+  [-3, [24, 36, 84], [84, 74, 128], [226, 132, 104]],
+  [1, [44, 84, 150], [130, 140, 180], [246, 178, 120]],
+  [8, [36, 104, 186], [84, 152, 216], [150, 200, 236]],
+  [25, [24, 96, 190], [56, 134, 214], [118, 180, 232]],
+];
+const rgbS = (c, a = 1) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+function skyColors(sc) {
+  const K = SKY_KEYS; let i = 0; while (i < K.length - 2 && sc.alt > K[i + 1][0]) i++;
+  const f = clamp((sc.alt - K[i][0]) / (K[i + 1][0] - K[i][0]), 0, 1);
+  let g = [1, 2, 3].map(j => mix(K[i][j], K[i + 1][j], f));
+  const L = clamp((sc.alt + 6) / 14, 0, 1); // how much daylight there is
+  const greyN = [[14, 16, 22], [24, 27, 36], [38, 42, 52]], greyD = [[86, 98, 112], [118, 130, 144], [150, 160, 172]];
+  const gf = Math.pow(sc.cloud, 1.5) * 0.92;
+  g = g.map((c, j) => mix(c, mix(greyN[j], greyD[j], L), gf));
+  const dark = clamp(sc.rain * 0.07 + (sc.thunder ? 0.3 : 0), 0, 0.5);
+  g = g.map(c => mix(c, [22, 26, 34], dark));
+  if (sc.fog) g = g.map(c => mix(c, mix([60, 64, 72], [176, 182, 188], L), 0.55));
+  if (sc.snow) g = g.map(c => mix(c, mix([52, 58, 72], [168, 178, 192], L), 0.35));
+  let cloud = mix([44, 50, 68], [255, 255, 255], L);
+  cloud = mix(cloud, [255, 190, 150], clamp(1 - Math.abs(sc.alt - 1) / 7, 0, 1) * 0.55); // lit from below around sunrise and sunset
+  cloud = mix(cloud, mix([30, 34, 44], [96, 104, 116], L), clamp(Math.pow(sc.cloud, 2) * 0.55 + dark, 0, 0.85));
+  return { g, L, cloud };
+}
+const fxRand = seed => () => { seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+const FX = { cv: null, ctx: null, w: 0, h: 0, dpr: 1, sc: null, key: '', col: null, t: 0, last: 0, raf: 0, R: fxRand(3),
+  stars: [], sprites: [], clouds: [], rain: [], splash: [], glass: [], trail: [], snow: [], settled: [], fog: [],
+  bolt: null, flash: 0, nextBolt: 3, shoot: null, nextShoot: 6, rects: [], rectsAt: -1, glassAt: 0, slant: 0, drift: 0,
+  dropSprite: null, fogSprite: null };
+function fxCanvas(w, h) { const cv = document.createElement('canvas'); cv.width = w; cv.height = h; return cv; }
+/* a cloud: soft puffs along a base line, darker underneath */
+function cloudSprite(seed, rgb) {
+  const R = fxRand(seed), cv = fxCanvas(480, 240), c = cv.getContext('2d');
+  for (let i = 0; i < 22; i++) { // a heap: big puffs in the middle, small ones at the ends, on one flat base
+    const u = R(), x = 80 + u * 320, mid = Math.sin(u * Math.PI), r = 30 + mid * 34 + R() * 22, y = 168 - r * 0.55 - R() * mid * 62;
+    const g = c.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, rgbS(rgb, 0.92)); g.addColorStop(0.5, rgbS(rgb, 0.72)); g.addColorStop(0.82, rgbS(rgb, 0.22)); g.addColorStop(1, rgbS(rgb, 0));
+    c.fillStyle = g; c.fillRect(x - r, y - r, 2 * r, 2 * r);
+  }
+  c.globalCompositeOperation = 'source-atop';
+  const sh = c.createLinearGradient(0, 80, 0, 200); sh.addColorStop(0, 'rgba(0,0,0,0)'); sh.addColorStop(1, 'rgba(10,18,36,0.34)');
+  c.fillStyle = sh; c.fillRect(0, 0, 480, 240);
+  return cv;
+}
+/* a drop on the glass: it turns the sky upside down (light below, dark above), with one highlight */
+function dropSprite() {
+  const cv = fxCanvas(64, 64), c = cv.getContext('2d');
+  c.beginPath(); c.arc(32, 32, 28, 0, 6.2832); c.clip();
+  c.fillStyle = 'rgba(255,255,255,0.07)'; c.fillRect(0, 0, 64, 64);
+  let g = c.createRadialGradient(32, 52, 0, 32, 46, 26); g.addColorStop(0, 'rgba(255,255,255,0.55)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+  c.fillStyle = g; c.fillRect(0, 0, 64, 64);
+  g = c.createRadialGradient(32, 6, 0, 32, 14, 28); g.addColorStop(0, 'rgba(0,10,30,0.42)'); g.addColorStop(1, 'rgba(0,10,30,0)');
+  c.fillStyle = g; c.fillRect(0, 0, 64, 64);
+  c.lineWidth = 2.5; c.strokeStyle = 'rgba(255,255,255,0.22)'; c.beginPath(); c.arc(32, 32, 27, 0, 6.2832); c.stroke();
+  c.fillStyle = 'rgba(255,255,255,0.9)'; c.beginPath(); c.ellipse(22, 20, 5, 3.2, -0.6, 0, 6.2832); c.fill();
+  return cv;
+}
+function fogSprite() {
+  const R = fxRand(5), cv = fxCanvas(640, 200), c = cv.getContext('2d');
+  for (let i = 0; i < 14; i++) {
+    const x = R() * 640, y = 70 + R() * 60, r = 70 + R() * 60;
+    for (const dx of [-640, 0, 640]) { // the same puff on both edges: the band repeats without a seam
+      const g = c.createRadialGradient(x + dx, y, 0, x + dx, y, r); g.addColorStop(0, 'rgba(255,255,255,0.3)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+      c.fillStyle = g; c.fillRect(x + dx - r, y - r, 2 * r, 2 * r);
+    }
+  }
+  return cv;
+}
+function fxDrop(fresh) {
+  const R = FX.R, l = R() < 0.42 ? 0 : R() < 0.6 ? 1 : 2, heavy = 1 + Math.min(FX.sc.rain, 8) * 0.035;
+  return { l, x: R() * (FX.w + 240) - 120, y: fresh ? R() * FX.h : -30 - R() * 80, v: [520, 800, 1180][l] * (0.85 + R() * 0.3) * heavy, len: [9, 15, 25][l] * (0.8 + R() * 0.5) * heavy };
+}
+function fxFlake(fresh) {
+  const R = FX.R, l = R() < 0.45 ? 0 : R() < 0.6 ? 1 : 2;
+  return { l, x: R() * (FX.w + 120) - 60, y: fresh ? R() * FX.h : -10 - R() * 40, r: [0.9, 1.6, 2.6][l] * (0.8 + R() * 0.5), v: [26, 48, 82][l] * (0.8 + R() * 0.4), p: R() * 6.28, s: 0.6 + R() * 0.9 };
+}
+function fxBolt() {
+  const R = FX.R, w = FX.w, h = FX.h, segs = [];
+  const run = (x, y, end, spread, depth) => {
+    const pts = [[x, y]];
+    while (y < end) {
+      x += (R() - 0.5) * spread; y += 14 + R() * 30; pts.push([x, y]);
+      if (depth < 2 && R() < 0.16) run(x, y, y + (end - y) * (0.3 + R() * 0.4), spread * 1.3, depth + 1);
+    }
+    segs.push({ pts, wide: depth === 0 });
+  };
+  run(w * (0.15 + R() * 0.7), -10, h * (0.42 + R() * 0.25), 46, 0);
+  return { segs, age: 0 };
+}
+function skyBuild() {
+  const sc = FX.sc, R = FX.R = fxRand(3), w = FX.w, h = FX.h, area = clamp(w * h / (390 * 844), 0.6, 2.2);
+  FX.col = skyColors(sc);
+  const sx = -Math.sin(sc.dir * Math.PI / 180) >= 0 ? 1 : -1;
+  FX.slant = clamp(sc.wind / 70, 0.05, 0.55) * sx;
+  FX.drift = (3 + sc.wind * 0.55) * sx;
+  FX.stars = Array.from({ length: 150 }, () => ({ x: R() * w, y: R() * h * 0.9, r: 0.4 + R() * R() * 1.3, p: R() * 6.28, s: 0.5 + R() * 2 }));
+  FX.sprites = [0, 1, 2, 3].map(i => cloudSprite(11 + i, FX.col.cloud));
+  FX.clouds = Array.from({ length: Math.round(1 + sc.cloud * 12) }, (_, i) => {
+    const d = R();
+    // a few clouds: each one clear against the blue, high up; a full sky: large, overlapping, down to the bottom
+    return { s: i % 4, x: R() * (w + 500) - 250, y: (sc.cloud > 0.75 ? R() * 0.85 : R() * R() * 0.5) * h - 60, k: (sc.cloud > 0.75 ? 0.8 : 0.45) + d * 0.9, a: sc.cloud > 0.75 ? 0.35 + R() * 0.35 : 0.7 + R() * 0.25, v: 0.4 + d };
+  }).sort((a, b) => a.k - b.k);
+  FX.rain = sc.rain > 0 ? Array.from({ length: Math.round(clamp(90 + sc.rain * 50, 90, 420) * area) }, () => fxDrop(true)) : [];
+  FX.snow = sc.snow > 0 ? Array.from({ length: Math.round(clamp(80 + sc.snow * 70, 80, 220) * area) }, () => fxFlake(true)) : [];
+  FX.fog = sc.fog ? [0.18, 0.4, 0.62, 0.84].map((y, i) => ({ y: y * h, x: R() * 640, v: (6 + i * 5) * (i % 2 ? -1 : 1), a: 0.5 + R() * 0.3, k: 1.3 + R() * 0.8 })) : [];
+  FX.splash = []; FX.glass = []; FX.trail = []; FX.settled = []; FX.bolt = null; FX.flash = 0; FX.shoot = null;
+  FX.nextBolt = FX.t + 1.5; FX.nextShoot = FX.t + 5; FX.rectsAt = -1; FX.glassAt = 0;
+  if (!FX.dropSprite) FX.dropSprite = dropSprite();
+  if (!FX.fogSprite) FX.fogSprite = fogSprite();
+  for (let i = 0; i < 150; i++) skyStep(1 / 30); // start in the middle of the weather, not with an empty sky
+}
+/* the top edges of the cards, in canvas coordinates: where rain splashes and snow settles */
+function skyRects() {
+  FX.rectsAt = FX.t;
+  if (state.tab !== 'overview') { FX.rects = []; return; }
+  const p = $('phone').getBoundingClientRect();
+  FX.rects = [...$('content').querySelectorAll('.card')].map(el => { const r = el.getBoundingClientRect(); return { l: r.left - p.left + 12, r: r.right - p.left - 12, t: r.top - p.top }; }).filter(r => r.t > 0 && r.t < FX.h);
+}
+const fxHit = (x, y0, y1) => { for (const r of FX.rects) if (x > r.l && x < r.r && y0 < r.t && y1 >= r.t) return r; return null; };
+function skyStep(dt) {
+  const sc = FX.sc, R = FX.R, w = FX.w, h = FX.h; FX.t += dt;
+  const wet = sc.rain > 0 || sc.snow > 0;
+  if (wet && (FX.rectsAt < 0 || FX.t - FX.rectsAt > 0.3)) skyRects();
+  for (const c of FX.clouds) { c.x += FX.drift * c.v * dt; const cw = 480 * c.k; if (c.x > w + 40) c.x = -cw - 20; else if (c.x < -cw - 40) c.x = w + 20; }
+  for (const f of FX.fog) f.x += f.v * dt;
+  for (let i = 0; i < FX.rain.length; i++) {
+    const d = FX.rain[i], y0 = d.y; d.y += d.v * dt; d.x += d.v * FX.slant * dt;
+    const hit = d.l === 2 ? fxHit(d.x, y0, d.y) : null;
+    if (hit) {
+      for (let k = 0, n = 2 + (R() * 2 | 0); k < n && FX.splash.length < 160; k++) FX.splash.push({ x: d.x, y: hit.t, vx: (R() - 0.5) * 150 + FX.slant * 60, vy: -(70 + R() * 130), life: 1 });
+      FX.rain[i] = fxDrop(false);
+    } else if (d.y > h + 30) FX.rain[i] = fxDrop(false);
+  }
+  for (const s of FX.splash) { s.vy += 900 * dt; s.x += s.vx * dt; s.y += s.vy * dt; s.life -= dt * 3.2; }
+  if (FX.splash.length) FX.splash = FX.splash.filter(s => s.life > 0);
+  if (sc.rain > 0) { // drops on the glass: they land, sit, and the heavy ones run down in fits and starts, leaving beads
+    FX.glassAt -= dt;
+    if (FX.glassAt <= 0 && FX.glass.length < 34) {
+      FX.glassAt = (0.25 + R() * 0.9) / clamp(0.6 + sc.rain * 0.45, 0.6, 3.5);
+      const r = 2.2 + R() * R() * 7;
+      FX.glass.push({ x: R() * w, y: R() * h * 0.92, r, age: 0, life: 5 + R() * 9, v: 0, to: 0, sw: 0.4 + R() * 1.5, run: r > 4.6, ty: 0 });
+    }
+    for (const g of FX.glass) {
+      g.age += dt;
+      if (!g.run) continue;
+      g.sw -= dt;
+      if (g.sw <= 0) { g.sw = 0.15 + R() * 0.8; g.to = R() < 0.35 ? 0 : 50 + R() * 240; }
+      g.v += (g.to - g.v) * Math.min(1, dt * 7);
+      const dy = g.v * dt; g.y += dy; g.x += (R() - 0.5) * dy * 0.5 + FX.slant * dy * 0.15; g.ty += dy;
+      if (g.ty > 9 && FX.trail.length < 140) { g.ty = 0; FX.trail.push({ x: g.x + (R() - 0.5) * 2, y: g.y - g.r, r: 0.8 + R() * 1.3, life: 1 }); g.r = Math.max(2.4, g.r - 0.03); }
+    }
+    FX.glass = FX.glass.filter(g => g.age < g.life && g.y < h + 20);
+    for (const tr of FX.trail) tr.life -= dt / 3.2;
+    if (FX.trail.length) FX.trail = FX.trail.filter(tr => tr.life > 0);
+  }
+  for (let i = 0; i < FX.snow.length; i++) {
+    const f = FX.snow[i], y0 = f.y; f.y += f.v * dt; f.x += (Math.sin(FX.t * f.s + f.p) * 16 + FX.drift * 1.6) * dt * (0.5 + f.l * 0.4);
+    const hit = f.l > 0 ? fxHit(f.x, y0, f.y) : null;
+    if (hit && R() < 0.7) { if (FX.settled.length < 220) FX.settled.push({ x: f.x, y: hit.t - f.r * 0.3, r: f.r, life: 1 }); FX.snow[i] = fxFlake(false); }
+    else if (f.y > h + 10) FX.snow[i] = fxFlake(false);
+    else if (f.x > w + 70) f.x = -60; else if (f.x < -70) f.x = w + 60;
+  }
+  for (const s of FX.settled) s.life -= dt / 9;
+  if (FX.settled.length) FX.settled = FX.settled.filter(s => s.life > 0);
+  if (sc.thunder) {
+    if (FX.bolt) { FX.bolt.age += dt; if (FX.bolt.age > 0.5) FX.bolt = null; }
+    if (FX.t >= FX.nextBolt) { FX.bolt = fxBolt(); FX.nextBolt = FX.t + 3.5 + R() * 7; }
+    const a = FX.bolt ? FX.bolt.age : 9; // two flickers, the second weaker
+    FX.flash = a < 0.09 ? 1 - a / 0.09 * 0.6 : a < 0.14 ? 0.15 : a < 0.3 ? 0.7 * (1 - (a - 0.14) / 0.16) : 0;
+  }
+  if (FX.shoot) { FX.shoot.age += dt; if (FX.shoot.age > 0.7) FX.shoot = null; }
+  else if (sc.alt < -8 && sc.cloud < 0.35 && !sc.fog && FX.t >= FX.nextShoot) {
+    FX.shoot = { x: w * (0.1 + R() * 0.6), y: h * (0.05 + R() * 0.25), a: 0.5 + R() * 0.5, age: 0 }; FX.nextShoot = FX.t + 9 + R() * 18;
+  }
+}
+function skyDraw() {
+  const c = FX.ctx, w = FX.w, h = FX.h, sc = FX.sc, col = FX.col, t = FX.t;
+  if (!c || !sc) return;
+  c.setTransform(FX.dpr, 0, 0, FX.dpr, 0, 0); c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
+  const bg = c.createLinearGradient(0, 0, 0, h);
+  bg.addColorStop(0, rgbS(col.g[0])); bg.addColorStop(0.55, rgbS(col.g[1])); bg.addColorStop(1, rgbS(col.g[2]));
+  c.fillStyle = bg; c.fillRect(0, 0, w, h);
+  const night = clamp((-sc.alt - 3) / 9, 0, 1) * (1 - sc.cloud * 0.92) * (sc.fog ? 0.3 : 1);
+  if (night > 0.02) {
+    c.fillStyle = '#fff';
+    for (const s of FX.stars) { c.globalAlpha = night * (0.4 + 0.6 * Math.pow(Math.sin(t * s.s + s.p), 2)); c.beginPath(); c.arc(s.x, s.y, s.r, 0, 6.2832); c.fill(); }
+    if (FX.shoot) {
+      const s = FX.shoot, k = s.age / 0.7, x = s.x + Math.cos(s.a) * 260 * k, y = s.y + Math.sin(s.a) * 260 * k, tx = x - Math.cos(s.a) * 70, ty = y - Math.sin(s.a) * 70;
+      const g = c.createLinearGradient(tx, ty, x, y); g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(1, 'rgba(255,255,255,0.9)');
+      c.globalAlpha = night * Math.sin(Math.PI * k); c.strokeStyle = g; c.lineWidth = 1.4; c.lineCap = 'round'; c.beginPath(); c.moveTo(tx, ty); c.lineTo(x, y); c.stroke();
+    }
+    c.globalAlpha = 1;
+  }
+  const sv = Math.pow(1 - sc.cloud, 1.4) * clamp((sc.alt + 2) / 6, 0, 1) * (sc.fog ? 0.5 : 1);
+  if (sv > 0.02) { // the sun: a wide glow, slow rays, a white core, on the right so the title stays readable
+    const p = sc.sunP, sx = w * (0.6 + 0.28 * p), sy = h * (0.22 - 0.15 * Math.sin(Math.PI * p)) + (sc.alt < 6 ? (6 - sc.alt) * h * 0.012 : 0);
+    const warm = mix([255, 250, 232], [255, 196, 130], clamp(1 - sc.alt / 10, 0, 1));
+    c.globalCompositeOperation = 'lighter';
+    let g = c.createRadialGradient(sx, sy, 0, sx, sy, w * 1.15);
+    g.addColorStop(0, rgbS(warm, 0.6 * sv)); g.addColorStop(0.22, rgbS(warm, 0.16 * sv)); g.addColorStop(1, rgbS(warm, 0));
+    c.fillStyle = g; c.fillRect(0, 0, w, h);
+    g = c.createRadialGradient(sx, sy, 0, sx, sy, w * 1.2); g.addColorStop(0, rgbS(warm, 0.05 * sv)); g.addColorStop(0.6, rgbS(warm, 0.012 * sv)); g.addColorStop(1, rgbS(warm, 0));
+    c.fillStyle = g;
+    for (let i = 0; i < 9; i++) { // wide and faint, breathing a little: light in haze, not a drawing of a sun
+      const a = t * 0.02 + i * 0.698 + Math.sin(i * 7.1) * 0.2, hw = (0.1 + (Math.sin(i * 3.3) + 1) * 0.07) * (0.85 + 0.15 * Math.sin(t * 0.3 + i)), len = w * 1.2;
+      c.beginPath(); c.moveTo(sx, sy); c.lineTo(sx + Math.cos(a - hw) * len, sy + Math.sin(a - hw) * len); c.lineTo(sx + Math.cos(a + hw) * len, sy + Math.sin(a + hw) * len); c.closePath(); c.fill();
+    }
+    g = c.createRadialGradient(sx, sy, 0, sx, sy, 40); g.addColorStop(0, rgbS([255, 255, 250], sv)); g.addColorStop(0.4, rgbS(warm, 0.85 * sv)); g.addColorStop(1, rgbS(warm, 0));
+    c.fillStyle = g; c.fillRect(sx - 40, sy - 40, 80, 80);
+    for (const [k, r, a] of [[0.45, 14, 0.07], [0.8, 34, 0.045], [1.25, 9, 0.08]]) { // lens flares towards the middle of the screen
+      const fx = sx + (w / 2 - sx) * k * 2, fy = sy + (h / 2 - sy) * k * 2;
+      c.fillStyle = rgbS(warm, a * sv); c.beginPath(); c.arc(fx, fy, r, 0, 6.2832); c.fill();
+    }
+    c.globalCompositeOperation = 'source-over';
+  }
+  for (const cl of FX.clouds) { c.globalAlpha = cl.a; c.drawImage(FX.sprites[cl.s], cl.x, cl.y, 480 * cl.k, 240 * cl.k); }
+  for (const f of FX.fog) {
+    c.globalAlpha = f.a * (0.55 + 0.45 * col.L);
+    const fw = 640 * f.k, x0 = ((f.x % fw) + fw) % fw - fw;
+    for (let x = x0; x < w; x += fw) c.drawImage(FX.fogSprite, x, f.y - 100 * f.k, fw, 200 * f.k);
+  }
+  c.globalAlpha = 1;
+  if (FX.rain.length) {
+    c.lineCap = 'round';
+    for (let l = 0; l < 3; l++) {
+      c.strokeStyle = `rgba(${col.L > 0.5 ? '235,242,255' : '190,208,240'},${[0.2, 0.32, 0.5][l]})`; c.lineWidth = [0.8, 1.1, 1.6][l];
+      c.beginPath();
+      for (const d of FX.rain) if (d.l === l) { c.moveTo(d.x, d.y); c.lineTo(d.x - FX.slant * d.len, d.y - d.len); }
+      c.stroke();
+    }
+    c.fillStyle = '#fff';
+    for (const s of FX.splash) { c.globalAlpha = 0.6 * s.life; c.beginPath(); c.arc(s.x, s.y, 1.1, 0, 6.2832); c.fill(); }
+    c.globalAlpha = 1;
+  }
+  if (FX.snow.length || FX.settled.length) {
+    c.fillStyle = '#fff';
+    for (let l = 0; l < 3; l++) {
+      c.globalAlpha = [0.5, 0.75, 0.95][l]; c.beginPath();
+      for (const f of FX.snow) if (f.l === l) { c.moveTo(f.x + f.r, f.y); c.arc(f.x, f.y, f.r, 0, 6.2832); }
+      c.fill();
+    }
+    for (const s of FX.settled) { c.globalAlpha = 0.9 * Math.min(1, s.life * 3); c.beginPath(); c.arc(s.x, s.y, s.r, 0, 6.2832); c.fill(); }
+    c.globalAlpha = 1;
+  }
+  if (FX.flash > 0) {
+    c.globalCompositeOperation = 'lighter'; c.fillStyle = `rgba(190,205,255,${0.38 * FX.flash})`; c.fillRect(0, 0, w, h);
+    if (FX.bolt && FX.bolt.age < 0.3) {
+      c.lineJoin = 'round'; c.lineCap = 'round';
+      for (const [lw, a] of [[7, 0.18], [1.8, 0.95]]) for (const s of FX.bolt.segs) {
+        c.strokeStyle = `rgba(225,232,255,${a * FX.flash})`; c.lineWidth = s.wide ? lw : lw * 0.55;
+        c.beginPath(); s.pts.forEach((p, i) => (i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1]))); c.stroke();
+      }
+    }
+    c.globalCompositeOperation = 'source-over';
+  }
+  if (FX.glass.length || FX.trail.length) {
+    const sp = FX.dropSprite;
+    for (const tr of FX.trail) { c.globalAlpha = 0.7 * tr.life; c.drawImage(sp, tr.x - tr.r, tr.y - tr.r, 2 * tr.r, 2 * tr.r); }
+    for (const g of FX.glass) {
+      const a = Math.min(1, g.age * 6) * Math.min(1, (g.life - g.age) * 1.2), st = 1 + Math.min(0.35, g.v / 500), rx = g.r / Math.sqrt(st), ry = g.r * st;
+      c.globalAlpha = a * (0.75 + 0.25 * col.L); c.drawImage(sp, g.x - rx, g.y - ry, 2 * rx, 2 * ry);
+    }
+    c.globalAlpha = 1;
+  }
+}
+const skyStill = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+/* in sight: Overzicht itself, or a picture of it under a page that is opening, closing or being swiped away */
+const skyWanted = () => !!FX.sc && !document.hidden && (state.tab === 'overview' || !!navDone || swipe.engaged);
+function skyFrame(ts) {
+  FX.raf = 0;
+  if (!skyWanted() || skyStill()) return;
+  skyStep(Math.min(0.05, Math.max(0, (ts - FX.last) / 1000))); FX.last = ts;
+  skyDraw();
+  FX.raf = requestAnimationFrame(skyFrame);
+}
+function skyKick() { if (!FX.raf && FX.ctx && skyWanted() && !skyStill()) { FX.last = performance.now(); FX.raf = requestAnimationFrame(skyFrame); } }
+/* called from render(): the canvas follows the size of the phone, the scene the weather; then one frame at once */
+function skyUpdate() {
+  const phone = $('phone');
+  if (!FX.cv) {
+    const cv = document.createElement('canvas'); cv.id = 'skyfx'; cv.className = 'skyfx'; cv.setAttribute('aria-hidden', 'true');
+    const ctx = cv.getContext && cv.getContext('2d'); if (!ctx) return;
+    phone.insertBefore(cv, phone.firstChild); FX.cv = cv; FX.ctx = ctx;
+  }
+  const w = phone.clientWidth, h = phone.clientHeight; if (!w || !h) return;
+  const dpr = Math.min(2, window.devicePixelRatio || 1), sc = skyScene();
+  const key = [w, h, dpr, Math.round(sc.cloud * 10), sc.rain > 0 ? Math.ceil(sc.rain) : 0, sc.snow > 0 ? Math.ceil(sc.snow) : 0, sc.thunder, sc.fog, Math.round(sc.wind / 5), Math.round(sc.dir / 45)].join('|');
+  if (key !== FX.key) {
+    if (w !== FX.w || h !== FX.h || dpr !== FX.dpr) { FX.cv.width = Math.round(w * dpr); FX.cv.height = Math.round(h * dpr); FX.w = w; FX.h = h; FX.dpr = dpr; }
+    FX.key = key; FX.sc = sc; skyBuild();
+  } else { // the same weather, the sun a little further: only the colours move, nothing jumps
+    FX.sc = sc; const col = skyColors(sc);
+    if (!FX.col || col.cloud.join() !== FX.col.cloud.join()) FX.sprites = [0, 1, 2, 3].map(i => cloudSprite(11 + i, col.cloud));
+    FX.col = col;
+  }
+  FX.rectsAt = -1;
+  skyDraw(); skyKick();
+}
+document.addEventListener('visibilitychange', skyKick);
+if (skyDemo) window.regenSky = { show: name => { if (SKY_DEMO[name]) { skyDemo = SKY_DEMO[name]; skyUpdate(); } return Object.keys(SKY_DEMO); }, bolt: () => { FX.bolt = fxBolt(); FX.nextBolt = FX.t + 5; skyStep(0.03); skyDraw(); }, step: (n = 1) => { for (let i = 0; i < n; i++) skyStep(1 / 60); skyDraw(); return FX.t; }, scene: () => FX.sc };
+
+/* ======================================================================
    5. UI wiring: tabs, sheet, search, geolocation
    ====================================================================== */
 // jump, not glide: .screen scrolls smoothly, and render() would put a half-finished scroll back
@@ -2510,58 +2864,113 @@ const toTop = () => scrollJump(0);
    Every page we open also gets a browser history entry carrying its depth, so the browser's back and ours stay
    in step: popstate only pops what the stack still holds above that depth. ---- */
 const nav = { stack: [] };
+/* On an iPhone, as an app on the home screen, iOS swipes back through the history by itself and shows its own
+   picture of the previous page; together with our swipe that gave two pages sliding at once. There is no
+   back button there either, so that app keeps no history: our swipe and "‹ Overzicht" are the only backs. */
+const useHistory = navigator.standalone !== true;
 function openPage(tab, day) {
-  nav.stack.push({ tab: state.tab, day: state.day, scroll: $('screen').scrollTop, title: state.tab === 'overview' ? TABS.overview : $('title').textContent }); // Overzicht's title is the place: back says where in the app
+  navSettle();
+  const snap = snapPage(); // the page we leave stays as a picture: under the new page now, under the swipe later
+  nav.stack.push({ tab: state.tab, day: state.day, scroll: $('screen').scrollTop, title: state.tab === 'overview' ? TABS.overview : $('title').textContent, snap }); // Overzicht's title is the place: back says where in the app
   state.tab = tab; if (day !== undefined) state.day = day;
-  toTop(); render(); pageAnim('fwd');
-  try { history.pushState({ regenDepth: nav.stack.length }, ''); } catch (e) {}
+  toTop(); render();
+  if (motionOk()) { mountSnap(snap, false); slide($('screen'), snap.el, true, () => snap.el.remove()); }
+  if (useHistory) try { history.pushState({ regenDepth: nav.stack.length }, ''); } catch (e) {}
 }
 function popTo(depth) {
+  const quiet = MOTION.quiet; MOTION.quiet = false;
   let prev = null;
   while (nav.stack.length > Math.max(0, depth)) prev = nav.stack.pop();
   if (!prev) return false;
+  navSettle();
+  const out = !quiet && motionOk() ? snapPage() : null; // the page we leave slides away as a picture, over the live one
   state.tab = prev.tab; state.day = prev.day;
-  render(); scrollJump(prev.scroll); pageAnim('back');
+  render(); scrollJump(prev.scroll);
+  if (out) { mountSnap(out, true); slide(out.el, $('screen'), false, () => out.el.remove()); }
   return true;
 }
-/* Transitions (UX-audit B4, B10): a page that opens slides in from the right, going back it comes from the
-   left, a tab fades in. Short and small (36 px), header and content together; nothing under reduced motion,
-   and nothing after the edge swipe, which has already moved the page with the finger. */
-const MOTION = { page: 220, fast: 150, ease: 'cubic-bezier(.2,.8,.2,1)', quiet: false }; // = --dur-page, --dur-fast and --ease in app.css
-function pageAnim(kind) {
-  if (MOTION.quiet) { MOTION.quiet = false; return; }
-  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-  const dx = kind === 'fwd' ? 36 : kind === 'back' ? -36 : 0;
-  const frames = dx ? [{ transform: `translateX(${dx}px)`, opacity: 0 }, { transform: 'none', opacity: 1 }] : [{ opacity: 0 }, { opacity: 1 }];
-  for (const el of [$('top'), $('content')]) if (el.animate) el.animate(frames, { duration: dx ? MOTION.page : MOTION.fast, easing: MOTION.ease });
+/* Transitions: pages are stacked, as in an iPhone app. A page that opens slides in from the right over the
+   full width, over the page you came from, which stays where it is (a little to the left, a little dimmer).
+   Going back the top page slides away to the right and the one under it comes back. Nothing under reduced
+   motion, and nothing after the edge swipe, which has already moved the page with the finger.
+   The page that is not live is a picture of it: a copy of the screen as it stood (snapPage), with its scroll
+   positions, that cannot be touched. So render() keeps drawing into the one live screen. */
+const MOTION = { page: 220, fast: 150, ease: 'cubic-bezier(.2,.8,.2,1)', push: 420, pushEase: 'cubic-bezier(.32,.72,0,1)', quiet: false }; // = --dur-page, --dur-fast, --ease, --dur-push and --ease-push in app.css
+const UNDER = { shift: 30, dim: 0.6 }; // the page underneath: 30 % to the left and at 60 % when fully covered
+const motionOk = () => !matchMedia('(prefers-reduced-motion: reduce)').matches && !!$('screen').animate;
+function snapPage() {
+  const s = $('screen'), el = s.cloneNode(true), scrolls = [[el, 0, s.scrollTop]];
+  const a = s.querySelectorAll('*'), b = el.querySelectorAll('*');
+  for (let i = 0; i < a.length; i++) {
+    const n = a[i], m = b[i];
+    if (n instanceof HTMLElement && (n.scrollLeft || n.scrollTop)) scrolls.push([m, n.scrollLeft, n.scrollTop]);
+    // the copy gets ids of its own, so $() and the gradients and clips of the live page keep finding their own
+    if (m.id) m.id += '-snap';
+    if (m instanceof SVGElement) for (const at of m.attributes) if (at.value.includes('url(#')) at.value = at.value.replace(/url\(#([^)]+)\)/g, 'url(#$1-snap)');
+  }
+  el.id += '-snap';
+  el.classList.remove('swiping', 'sliding', 'settling'); el.classList.add('snap');
+  el.style.transform = ''; el.style.opacity = '';
+  el.setAttribute('aria-hidden', 'true'); el.inert = true;
+  return { el, scrolls };
+}
+/* after the live screen in the document (so every lookup finds the live page first); CSS puts it under or over */
+function mountSnap(snap, over) {
+  snap.el.classList.toggle('over', over);
+  $('screen').after(snap.el);
+  for (const [n, x, y] of snap.scrolls) { n.scrollLeft = x; n.scrollTop = y; }
+}
+const underAt = p => ({ transform: `translateX(${-(1 - p) * UNDER.shift}%)`, opacity: String(UNDER.dim + (1 - UNDER.dim) * p) }); // p: 0 covered, 1 in full view
+let navDone = null; // finishes the slide that is running, if any
+function navSettle() { if (navDone) navDone(); }
+function slide(top, under, opening, cleanup) {
+  const phone = $('phone'), opts = { duration: MOTION.push, easing: MOTION.pushEase, fill: 'both' };
+  const tf = [{ transform: 'translateX(100%)' }, { transform: 'translateX(0)' }], uf = [underAt(1), underAt(0)];
+  phone.classList.add('navving'); top.classList.add('sliding');
+  skyKick(); // Overzicht may be coming into sight
+  const anims = [top.animate(opening ? tf : tf.reverse(), opts), under.animate(opening ? uf : uf.reverse(), opts)];
+  let done = false;
+  const finish = () => {
+    if (done) return; done = true; clearTimeout(timer);
+    if (navDone === finish) navDone = null;
+    cleanup(); // first, in the same frame: the picture goes before the live page is let go
+    for (const an of anims) an.cancel();
+    phone.classList.remove('navving'); top.classList.remove('sliding');
+  };
+  const timer = setTimeout(finish, MOTION.push + 150); // in case the animation never ends (tab in the background)
+  anims[0].finished.then(finish, () => {});
+  navDone = finish;
 }
 /* our back (button, swipe): pop now, then let the browser follow; its popstate then finds nothing left to do */
 function goBack() {
   if (!popTo(nav.stack.length - 1)) return false;
-  try { history.back(); } catch (e) {}
+  if (useHistory) try { history.back(); } catch (e) {}
   return true;
 }
 function resetNav() {
   const n = nav.stack.length; if (!n) return;
+  navSettle();
   nav.stack = [];
-  try { history.go(-n); } catch (e) {}
+  if (useHistory) try { history.go(-n); } catch (e) {}
 }
-window.addEventListener('popstate', e => { popTo((e.state && e.state.regenDepth) || 0); });
+/* the browser's own back. Safari in a tab has then already slid the page with the finger (its edge swipe):
+   a touch that began at the edge just before means no second slide from us */
+let edgeTouch = 0;
+{
+  const mark = e => { const t = e.changedTouches && e.changedTouches[0]; if (t && (t.clientX < 30 || t.clientX > innerWidth - 30)) edgeTouch = Date.now(); };
+  window.addEventListener('touchstart', e => { edgeTouch = 0; mark(e); }, { passive: true, capture: true });
+  for (const type of ['touchend', 'touchcancel']) window.addEventListener(type, () => { if (edgeTouch) edgeTouch = Date.now(); }, { passive: true, capture: true });
+}
+window.addEventListener('popstate', e => { if (Date.now() - edgeTouch < 800) MOTION.quiet = true; popTo((e.state && e.state.regenDepth) || 0); MOTION.quiet = false; });
 
 /* ---- swipe from the left edge = back. Only when the app runs on its own (added to the home screen): in a
    browser tab Safari does this swipe itself, through the history entries above, and two backs would be one
-   too many. ?veeg=1 switches it on in a browser, for trying it out. ---- */
+   too many. ?veeg=1 switches it on in a browser, for trying it out.
+   The page follows the finger and the page you go back to lies under it: the picture taken when you left it. ---- */
 const SWIPE_EDGE = 24; // px from the left edge of the app where the swipe may start
-const swipe = { on: false, engaged: false, x0: 0, y0: 0, t0: 0, dx: 0, w: 0 };
+const swipe = { on: false, engaged: false, x0: 0, y0: 0, t0: 0, dx: 0, w: 0, under: null };
 const ownSwipe = navigator.standalone === true || new URLSearchParams(location.search).get('veeg') === '1';
-function swipeHint() {
-  let el = $('swipeBack');
-  if (!el) {
-    el = h('div', 'swipe-back'); el.id = 'swipeBack'; el.setAttribute('aria-hidden', 'true');
-    $('phone').insertBefore(el, $('screen')); // under the screen, which slides away from it
-  }
-  return el;
-}
+const swipeUnder = p => { if (swipe.under) Object.assign(swipe.under.el.style, underAt(p)); };
 function swipeStart(x, y, t) {
   swipe.on = false;
   if (!nav.stack.length || !$('sheet').hidden) return false;
@@ -2580,24 +2989,22 @@ function swipeMove(x, y) {
     swipe.engaged = true;
     hideTooltip();
     for (const hh of document.querySelectorAll('.chart')) if (hh._scrubTo) hh._scrubTo(null);
-    const hint = swipeHint();
-    hint.textContent = '';
-    hint.insertAdjacentHTML('beforeend', '<svg class="ico" viewBox="0 0 20 20"><path d="M12.5 4.5L7 10l5.5 5.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>');
-    hint.appendChild(h('span', null, nav.stack[nav.stack.length - 1].title));
-    hint.hidden = false;
+    navSettle();
+    swipe.under = nav.stack[nav.stack.length - 1].snap || null;
+    if (swipe.under) { swipe.under.el.classList.remove('settling'); mountSnap(swipe.under, false); }
     $('screen').classList.add('swiping');
+    skyKick();
   }
   swipe.dx = Math.max(0, dx);
   $('screen').style.transform = `translateX(${swipe.dx}px)`;
-  const p = Math.min(1, swipe.dx / (swipe.w * 0.4));
-  const hint = swipeHint(); hint.style.opacity = p; hint.style.transform = `translateX(${(p - 1) * 16}px)`;
+  swipeUnder(Math.min(1, swipe.dx / Math.max(1, swipe.w)));
   return true;
 }
 function swipeFinish(back) {
-  const s = $('screen');
+  const s = $('screen'), under = swipe.under; swipe.under = null;
+  if (back) { MOTION.quiet = true; goBack(); } // the page already slid away with the finger; the live page takes the picture's place
   s.classList.remove('swiping', 'settling'); s.style.transform = '';
-  const hint = swipeHint(); hint.hidden = true; hint.style.opacity = ''; hint.style.transform = '';
-  if (back) { MOTION.quiet = true; goBack(); } // the page already slid away with the finger
+  if (under) { under.el.remove(); under.el.classList.remove('settling'); under.el.style.transform = ''; under.el.style.opacity = ''; }
 }
 /* far enough (40 % of the width) or a quick flick goes back; otherwise the page slides back into place */
 function swipeEnd(t, instant) {
@@ -2607,9 +3014,9 @@ function swipeEnd(t, instant) {
   const back = swipe.dx > swipe.w * 0.4 || (swipe.dx > 40 && swipe.dx / Math.max(1, t - swipe.t0) > 0.5);
   const s = $('screen');
   if (instant || matchMedia('(prefers-reduced-motion: reduce)').matches) { swipeFinish(back); return back; }
-  s.classList.add('settling');
+  s.classList.add('settling'); if (swipe.under) swipe.under.el.classList.add('settling');
   s.style.transform = back ? `translateX(${swipe.w}px)` : '';
-  const hint = swipeHint(); hint.style.opacity = back ? 1 : 0;
+  swipeUnder(back ? 1 : 0);
   let done = false;
   const finish = () => { if (done) return; done = true; s.removeEventListener('transitionend', finish); swipeFinish(back); };
   s.addEventListener('transitionend', finish);
@@ -3584,12 +3991,15 @@ function runTests() {
       ok(swipeStart(x, y, 0)); ok(!swipeMove(x + 2, y + 30), 'omhoog/omlaag = scrollen'); ok(!swipeEnd(100, true)); eq(state.tab, 'day');
       const start = () => { const r0 = swipeStart(x, y, 0); swipe.w = 400; return r0; }; // a 400 px wide phone, also when the page is hidden (width 0)
       ok(start()); ok(swipeMove(x + 60, y + 4)); ok($('screen').classList.contains('swiping'));
-      eq($('swipeBack').textContent, 'Overzicht', 'zegt waar je naartoe gaat');
-      ok(!swipeEnd(1000, true), '60 px langzaam: blijft staan'); eq(state.tab, 'day'); eq($('screen').style.transform, '');
+      const under = $('screen-snap');
+      ok(under && under.querySelector('.week-list'), 'het Overzicht ligt eronder'); ok(!under.classList.contains('over') && under.inert, 'onder de pagina, niet aan te raken');
+      eq($('title').textContent, pageTitle(), 'de kop van de pagina zelf blijft de echte'); ok(under.style.transform.includes('translateX(-'), 'iets naar links, schuift mee');
+      ok(!swipeEnd(1000, true), '60 px langzaam: blijft staan'); eq(state.tab, 'day'); eq($('screen').style.transform, ''); ok(!$('screen-snap'), 'onderlaag weer weg');
       ok(start()); swipeMove(x + 40, y); swipeMove(x + 70, y); ok(swipeEnd(100, true), 'snelle veeg gaat terug'); eq(state.tab, 'overview');
       $('content').querySelectorAll('.week-row.open')[0].click();
       ok(start()); swipeMove(x + 200, y); ok(swipeEnd(2000, true), 'halverwege losgelaten gaat terug'); eq(state.tab, 'overview');
-      ok(!$('screen').classList.contains('swiping') && $('swipeBack').hidden, 'opgeruimd');
+      ok(!$('screen').classList.contains('swiping') && !$('screen-snap'), 'opgeruimd');
+      navSettle(); ok(!$('phone').querySelector('.snap'), 'geen lagen over na het schuiven');
     } finally { state.forecast = saved.f; state.obs = saved.o; state.ens = saved.e; state.ecmwf = saved.c; state.tab = saved.t; state.day = saved.d; nav.stack = saved.n; render(); }
   });
 
@@ -3684,7 +4094,11 @@ function runTests() {
       ok(nc.querySelector('.now-tree svg .treeg'), 'boompje'); ok(nc.querySelector('.now-tree svg .windfield .streak'), 'met windveld');
       ok($('screen').classList.contains('sky'), 'lucht achter de kop');
       ok(/^rgb\(\d+,\d+,\d+\)$/.test($('screen').style.getPropertyValue('--sky-now')), 'luchtkleur gezet');
-      eq(getComputedStyle($('infoBtn')).color, getComputedStyle(document.body).color, 'knoppen in labelkleur'); ok(!document.querySelector('.tabbar, .tab'), 'geen tabbalk');
+      eq(getComputedStyle($('infoBtn')).color, getComputedStyle($('title')).color, 'knoppen in labelkleur');
+      ok($('skyfx') && $('skyfx') === $('phone').firstElementChild, 'de levende lucht ligt onder de pagina'); eq(getComputedStyle($('title')).color, 'rgb(255, 255, 255)', 'witte tekst op de lucht, in elk thema');
+      { const a = skyColors({ alt: 30, cloud: 0, rain: 0 }), b = skyColors({ alt: 30, cloud: 1, rain: 4 }), n = skyColors({ alt: -30, cloud: 0, rain: 0 });
+        ok(a.g[0][2] > a.g[0][0] + 60, 'heldere dag is blauw'); ok(Math.abs(b.g[0][2] - b.g[0][0]) < 40, 'regenlucht is grijs'); ok(n.g[0].every(v => v < 30), 'nacht is donker');
+        const s = skyScene(); ok(s.cloud >= 0 && s.cloud <= 1 && s.rain >= 0 && s.wind >= 0, 'het weer van nu als tafereel'); } ok(!document.querySelector('.tabbar, .tab'), 'geen tabbalk');
       state.tab = 'wind'; render(); ok(!$('screen').classList.contains('sky'), 'lucht alleen op Overzicht');
       state.tab = 'info'; render(); ok(!$('content').querySelector('input[type="checkbox"]'), 'geen proefschakelaar meer');
     } finally {

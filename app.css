@@ -52,6 +52,7 @@
   --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-6: 24px;
   --gap-card: var(--sp-3); /* between cards, on every page */
   --dur-fast: 150ms; --dur-page: 220ms; --ease: cubic-bezier(.2, .8, .2, 1);
+  --dur-push: 420ms; --ease-push: cubic-bezier(.32, .72, 0, 1); /* a page sliding over another, as on an iPhone */
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -168,7 +169,8 @@ a { color: var(--label-2); }
   }
 }
 .screen {
-  position: absolute; inset: 0;
+  position: absolute; inset: 0; z-index: 1;
+  background: var(--bg); /* opaque: pages lie on top of each other while one opens or closes */
   overflow-y: auto; overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
   /* no tab bar: Overzicht is the only root and every page opens from it, so the page runs to the home indicator */
@@ -307,17 +309,14 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .table-wrap { max-height: 320px; overflow: auto; }
 
 /* ---------- swipe from the left edge = back ---------- */
-/* the page follows the finger; under it, where it slides away, says where you go back to */
-.screen.swiping { background: var(--bg); box-shadow: -1px 0 0 var(--separator), -8px 0 24px rgba(0, 0, 0, 0.12); will-change: transform; }
-.screen.settling { transition: transform var(--dur-page) var(--ease); }
-.swipe-back {
-  position: absolute; left: 10px; top: 50%; margin-top: -18px; height: 36px;
-  display: flex; align-items: center; gap: 2px; padding: 0 12px 0 6px; border-radius: var(--r-pill);
-  background: var(--card); color: var(--tint); font-size: var(--t-sub); font-weight: 500;
-  opacity: 0; pointer-events: none;
-}
-.swipe-back[hidden] { display: none; }
-.swipe-back .ico { width: 18px; height: 18px; }
+/* Pages are stacked. The live page is #screen; the page under it (while a page opens, during the swipe) or
+   over it (while going back) is a picture of the screen as it stood: .snap, made in app.js (snapPage).
+   The page on top follows the finger or slides, with a soft edge on its left. */
+.screen.swiping, .screen.sliding { box-shadow: -1px 0 0 var(--separator), -8px 0 24px rgba(0, 0, 0, 0.12); will-change: transform; }
+.screen.settling { transition: transform var(--dur-page) var(--ease), opacity var(--dur-page) var(--ease); }
+.screen.snap { z-index: 0; scroll-behavior: auto; pointer-events: none; will-change: transform, opacity; }
+.screen.snap.over { z-index: 2; }
+.phone.navving .screen { pointer-events: none; } /* no taps on a page that is still sliding */
 
 /* ---------- week ---------- */
 .card.hours { padding: 4px 0 8px; overflow: hidden; }
@@ -408,7 +407,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   background: var(--tooltip-bg); color: var(--tooltip-fg); border-radius: var(--r-inner); padding: 10px 14px; font-size: var(--t-sub); text-align: center;
 }
 .attribution { font-size: var(--t-caption); color: var(--label-3); margin: 18px 0 8px; line-height: 1.5; }
-.loading .card, .loading .stats, .loading .hero { opacity: 0.6; transition: opacity 200ms; }
+/* refreshing does not dim the page: the arrow of pull-to-refresh spins and "bijgewerkt" gets the new time */
 .skeleton { height: 220px; border-radius: var(--r-inner); background: linear-gradient(90deg, var(--bg) 25%, var(--grid) 50%, var(--bg) 75%); background-size: 200% 100%; animation: shimmer 1.2s infinite; }
 @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 
@@ -563,10 +562,29 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 
 /* ---------- v25: UX-audit step 5: sky, sentence, tree, neutral controls ---------- */
 /* C2: the header of Overzicht in the tint of the sky of now, fading into the page */
+/* v29: the living sky. #skyfx (a canvas, drawn in app.js) lies under the pages and shows the weather of now.
+   Overzicht is glass over it: no background of its own, white text, cards that let the sky through. The same
+   in the light and the dark theme, as the sky decides the colours here. Other pages stay as they were. */
+.skyfx { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; display: block; pointer-events: none; }
 .screen.sky {
-  background: linear-gradient(180deg, var(--sky-now) 0, var(--sky-now) calc(40px + env(safe-area-inset-top)), var(--bg) calc(230px + env(safe-area-inset-top)));
-  background-attachment: local;
+  background: transparent; color-scheme: dark; color: var(--label);
+  --label: #ffffff; --label-2: rgba(255, 255, 255, 0.8); --label-3: rgba(255, 255, 255, 0.66);
+  --card: rgba(14, 24, 44, 0.38); --separator: rgba(255, 255, 255, 0.16); --grid: rgba(255, 255, 255, 0.14);
+  --tint: #ffffff; --tint-wash: rgba(255, 255, 255, 0.16); --rain-wash: rgba(110, 175, 255, 0.24);
+  --s1: #7dbcff; --s1-hover: #a4d0ff; --spread: rgba(255, 255, 255, 0.1);
+  --sun: #ffd058; --cloud-lo: #e4e9f0; --cloud-mid: #c3cad4; --cloud-hi: #9aa3b0;
+  --warn-bg: rgba(60, 44, 10, 0.55); --warn-fg: #ffd98a;
 }
+.screen.sky .top { text-shadow: 0 1px 10px rgba(0, 0, 20, 0.28); }
+.screen.sky .week-bar { background: rgba(0, 10, 30, 0.3); }
+.screen.sky .week-bar .fill { filter: brightness(1.35) saturate(1.15); }
+.screen.sky .card {
+  -webkit-backdrop-filter: blur(22px) saturate(1.5); backdrop-filter: blur(22px) saturate(1.5);
+  box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.screen.sky .wicon-big .wicon .cloud path { fill: #eef2f7; stroke: rgba(20, 30, 50, 0.25); }
+.screen.sky .wicon-big .wicon.cloud .cloud path, .screen.sky .wicon-big .wicon.rain .cloud path { fill: var(--cloud-lo); }
+.screen.sky .wicon-big .wicon .moon { fill: #f4f0dc; }
 /* C1: the weather in one or two sentences, where the feels-like line was */
 .now-say { margin: var(--sp-1) 0 0; font-size: var(--t-sub); line-height: 1.3; color: var(--label); }
 /* C3: a small tree with the wind of now, top right in the card; a tap opens Wind */
@@ -588,4 +606,4 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .now-card { padding-top: var(--sp-2); }
 .now-top { padding-bottom: 6px; }
 .now-card .rain-row { min-height: 32px; padding-top: 5px; padding-bottom: 5px; }
-#content.ov .card.hours .hour-strip { padding-top: 6px; }
+main.ov .card.hours .hour-strip { padding-top: 6px; }

@@ -308,3 +308,25 @@ Op `ux/v20-snelle-winst`. Op verzoek van Ima, in plaats van C5 (Vandaag · Week 
 - **Geen pijltjes meer** bij de regenregel en aan de rand van de uurstrook.
 - **Ruimte:** de pagina loopt nu door tot de thuisbalk (16 px plus de veilige marge, was 72 px voor de tabbalk); meldingen staan 24 px boven de thuisbalk. Nagemeten met de iPhone-marges: Overzicht heeft 57 px over, Per uur en de dagen 80 tot 110 px, Wind 104 px; Regen loopt met regen in de komende 2 uur nog 58 px over (was 114).
 - Cache v27. Zelftests: 89 (aangepast: geen tabbalk, het boompje opent Wind, geen pijltjes, Wind in plaats van Temperatuur in de kop- en luchttests).
+
+## Versie 28: gestapelde pagina's, zoals in een iPhone-app
+
+Na een vergelijking van twee schermopnames (de app naast Apple Weer): openen was een harde wissel, en bij terugvegen lag er niets onder de pagina (een zwart vlak met een pilletje).
+
+- **Pagina's liggen op elkaar (`snapPage`, `mountSnap`, `slide`):** de pagina die je verlaat blijft staan als een kopie van het scherm (`.screen.snap`, met eigen id's op `-snap`, de scrollplekken erbij, niet aan te raken). `render()` tekent nog steeds in het ene echte scherm. Openen: de nieuwe pagina schuift over de volle breedte van rechts over de vorige, die 30% naar links gaat en tot 60% dimt. Terug met de knop: de kopie van de bovenste pagina schuift naar rechts weg over de echte vorige pagina. 420 ms, `--dur-push` en `--ease-push`. Onder "verminder beweging" niets.
+- **Terugvegen:** onder de pagina die je vinger volgt ligt de kopie van de vorige pagina en schuift mee; het pilletje "‹ Overzicht" is weg. Na het loslaten neemt de echte pagina de plaats van de kopie in. De kopie is van het moment van openen: is er intussen ververst, dan zie je dat pas na het loslaten.
+- **Geen dubbel terugveeggebaar:** als app op het beginscherm van een iPhone houdt de app geen browsergeschiedenis meer bij (`useHistory`). iOS veegde daar zelf ook terug door de geschiedenis en liet zijn eigen plaatje van de vorige pagina zien, tegelijk met onze veeg. In een browsertab en op Android blijft de geschiedenis, voor de terugknop en de veeg van de browser; begon de veeg van Safari aan de rand, dan schuiven wij niet nog een keer.
+- **Verversen dimt de pagina niet meer** (`.loading` had 60% dekking); het pijltje van trekken-om-te-verversen draait en "bijgewerkt" krijgt de nieuwe tijd.
+- Cache v28. Zelftests: 89 (aangepast: bij de veeg ligt het Overzicht eronder en blijft er na afloop geen laag over).
+
+## Versie 29: de levende lucht achter Overzicht
+
+Op verzoek van Ima, naar het voorbeeld van Apple Weer: het weer van nu als bewegende achtergrond.
+
+- **Eén canvas onder de pagina's (`#skyfx`, deel 4b in app.js):** de kleur van de lucht uit de zonshoogte (nacht, schemer, gouden uur, dag), grijzer naarmate het bewolkter is en donkerder bij regen en onweer. Daarop: sterren die twinkelen en af en toe een vallende ster (heldere nacht), de zon met gloed, trage stralen en lensvlekken, wolken die met de wind meedrijven (richting en snelheid van nu), regen in drie dieptes die schuin valt met de wind en opspat op de bovenrand van de kaarten, druppels op het glas die blijven hangen en met horten naar beneden lopen, sneeuw die op de kaarten blijft liggen, bliksem met een lichtflits, en mistbanken.
+- **Waar het weer vandaan komt (`skyScene`):** bewolking en wind uit de meting (anders HARMONIE), regen uit de radar (anders het lopende uur), sneeuw, onweer en mist uit de omschrijving van het station of de weercode van het model.
+- **Overzicht is glas (`.screen.sky`):** geen eigen achtergrond, witte tekst, kaarten die de lucht doorlaten (`backdrop-filter`). In het lichte en het donkere thema hetzelfde: de lucht bepaalt hier de kleuren. De andere pagina's zijn ongewijzigd; bij openen, terug en vegen blijft de lucht onder het Overzicht staan.
+- **Zuinig:** de animatie loopt alleen zolang Overzicht in beeld is en de app zichtbaar; hooguit 2 beeldpunten per punt. Onder "verminder beweging" één stilstaand beeld. Bij hetzelfde weer verschuiven alleen de kleuren, zodat er bij verversen niets verspringt.
+- **Uitproberen:** `?weer=` met `helder`, `nacht`, `avond`, `schemer`, `halfbewolkt`, `bewolkt`, `regen`, `bui`, `nachtregen`, `sneeuw`, `onweer`, `mist` of `storm` toont dat weer, wat het ook echt doet.
+- Niet gemeten: de beeldsnelheid op een iPhone (het glas over een bewegende achtergrond is het zwaarste deel).
+- Cache v29. Zelftests: 89 (uitgebreid: het canvas ligt onder de pagina, witte tekst op Overzicht in elk thema, luchtkleuren voor dag, regen en nacht).
