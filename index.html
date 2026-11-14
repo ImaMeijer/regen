@@ -39,17 +39,19 @@
       <h2 id="sheetTitle">Locatie</h2>
       <button class="text-btn" id="sheetClose" type="button">Gereed</button>
     </div>
+    <button class="list-btn" id="geoBtn" type="button" aria-pressed="false">
+      <svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M17 3L3.5 8.6l5.6 2.3 2.3 5.6z" fill="currentColor"/></svg>
+      <span id="geoLabel">Volg mijn locatie</span>
+      <span class="hint" id="geoHint"></span>
+      <svg class="ico check" viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 10.5l3.5 3.5 7.5-8" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
     <form id="searchForm" autocomplete="off">
       <div class="search-field">
         <svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M13 13l4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-        <input type="search" id="q" placeholder="Plaats in Nederland of België" aria-label="Zoek plaats" enterkeyhint="search">
+        <input type="search" id="q" placeholder="Of kies een plaats in Nederland of België" aria-label="Zoek plaats" enterkeyhint="search">
       </div>
     </form>
     <ul class="list" id="results"></ul>
-    <button class="list-btn" id="geoBtn" type="button">
-      <svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2v3M10 15v3M2 10h3M15 10h3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="10" cy="10" r="4.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="10" cy="10" r="1.5" fill="currentColor"/></svg>
-      Huidige locatie gebruiken
-    </button>
   </section>
 
   <div class="toast" id="toast" role="status" hidden></div>

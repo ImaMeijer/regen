@@ -369,3 +369,13 @@ Op verzoek van Ima: omlaag vegen is duidelijk genoeg, en de rij van de knop kost
 - **De rij "‹ Overzicht" is weg** op elk blad; de titel staat nu direct onder het greepje (ruim 30 px gewonnen).
 - **De terugknop bestaat nog, als het greepje:** het streepje bovenaan het blad is de knop (`#backBtn`, 96 × 24 px met een raakvlak van 44 px). Een tik erop sluit het blad ook, zodat het met een muis, het toetsenbord en een schermlezer kan ("Terug naar Overzicht" als aria-label); Esc werkt ook. Icoon en woord worden niet getoond.
 - Cache v32. Zelftests: 89 (ongewijzigd: de knop zit nog in de kop en zegt waarheen).
+
+## Versie 33: volg mijn locatie, en altijd een plaatsnaam
+
+Op verzoek van Ima: de plaats moest telkens met de hand worden aangepast.
+
+- **Volg mijn locatie (`locate`, `hereStep`, `regen.follow`):** bovenaan het locatieblad. Staat het aan, dan vraagt de app je positie bij het openen en telkens als je naar de app terugkomt (hooguit eens per 2 minuten); een website kan je niet op de achtergrond volgen. Ben je 2 km of meer verplaatst, dan laadt het weer opnieuw; anders gebeurt er niets. Een plaats uit de zoeklijst zet het volgen uit. Achter de plaatsnaam op Overzicht staat dan een pijltje.
+- **Coördinaten worden altijd een plaatsnaam (`placeName`):** in Nederland de woonplaats waar je in staat, van PDOK (de Locatieserver van het Kadaster, `type=woonplaats`); daarbuiten de stad of het dorp van BigDataCloud. Beide krijgen de positie afgerond op 3 decimalen (ongeveer 100 m). Lukt het niet, dan "Mijn locatie" en wordt de naam de volgende keer opnieuw gevraagd. Info zegt dit erbij.
+- **Oude "Huidige locatie":** een plek die met de oude knop was opgeslagen (met coördinaten als naam) gaat vanaf nu volgen en krijgt een naam.
+- De zelftests vragen je locatie niet.
+- Cache v33. Zelftests: 90 (nieuw: plaatsnaam uit beide diensten, afronding, wanneer er opnieuw geladen wordt, pijltje en knop).

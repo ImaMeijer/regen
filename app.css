@@ -427,6 +427,14 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .list button:active { background: var(--tint-wash); }
 .list .sub { display: block; font-size: var(--t-foot); color: var(--label-3); }
 .list-btn { display: flex; align-items: center; gap: 10px; padding: 12px 4px; color: var(--tint); font-weight: 500; }
+/* v33: "Volg mijn locatie", above the search field: a check and the place when it is on */
+#geoBtn { width: 100%; min-height: var(--hit); text-align: left; margin-top: var(--sp-1); }
+#geoBtn .hint { margin-left: auto; font-weight: 400; font-size: var(--t-sub); color: var(--label-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#geoBtn .check { display: none; color: var(--s1); }
+#geoBtn.on .check { display: block; }
+#geoBtn:active { background: var(--tint-wash); border-radius: var(--r-inner); }
+/* the arrow behind the place name on Overzicht: this is where you are */
+.title-btn .here { width: 15px; height: 15px; margin: 6px 0 0 2px; opacity: 0.85; }
 
 /* ---------- tooltip & toast ---------- */
 .tooltip {

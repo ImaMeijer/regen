@@ -903,6 +903,7 @@ const state = { loc: DEFAULT_LOC, tab: 'overview', nowcast: null, forecast: null
 try {
   const l = JSON.parse(localStorage.getItem('regen.loc') || 'null');
   if (l && Number.isFinite(l.lat) && Number.isFinite(l.lon)) state.loc = l;
+  state.follow = localStorage.getItem('regen.follow') === '1'; // the place follows where you are (v33)
   const hz = parseFloat(localStorage.getItem('regen.horizon')); if (Number.isFinite(hz) && hz >= HORIZON_MIN) state.horizon = hz;
 } catch (e) {}
 
@@ -1277,8 +1278,10 @@ function render() {
   if (sub) { $('backLabel').textContent = backTarget(); $('backBtn').setAttribute('aria-label', `Terug naar ${backTarget()}`); }
   if (placeTitle) {
     const t = $('title'); t.textContent = '';
-    const btn = h('button', 'title-btn'); btn.type = 'button'; btn.setAttribute('aria-label', `${state.loc.name}, locatie wijzigen`);
+    const here = !!state.follow && !!state.loc.here; // a small arrow behind the name: this is where you are, and it moves with you
+    const btn = h('button', 'title-btn'); btn.type = 'button'; btn.setAttribute('aria-label', `${state.loc.name}${here ? ', je locatie' : ''}, locatie wijzigen`);
     btn.appendChild(h('span', null, state.loc.name));
+    if (here) btn.insertAdjacentHTML('beforeend', '<svg class="ico here" viewBox="0 0 20 20" aria-hidden="true"><path d="M17 3L3.5 8.6l5.6 2.3 2.3 5.6z" fill="currentColor"/></svg>');
     btn.insertAdjacentHTML('beforeend', '<svg class="ico chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>');
     btn.addEventListener('click', openSheet);
     t.appendChild(btn);
@@ -2458,7 +2461,7 @@ function renderInfo(c) {
   sec('Beaufort volgens KNMI', [
     '<table class="bft">' + BEAUFORT.map((b, i) => `<tr><td class="num">${i}</td><td>${b[0]}</td><td>${b[1]}</td></tr>`).join('') + '</table>',
   ]);
-  c.appendChild(h('p', 'info-foot', 'Deze app is een privéprototype. Instellingen zoals plaats en zoom, en de laatst opgehaalde weergegevens, blijven op je eigen telefoon; er worden geen gegevens verzameld.'));
+  c.appendChild(h('p', 'info-foot', 'Deze app is een privéprototype. Instellingen zoals plaats en zoom, en de laatst opgehaalde weergegevens, blijven op je eigen telefoon; er worden geen gegevens verzameld. Volgt de app je locatie, dan gaat je positie, afgerond op ongeveer 100 meter, naar PDOK (de kaartdienst van de overheid) om de naam van de plaats te vinden, en buiten Nederland naar BigDataCloud.'));
 }
 
 /* ---------------- Wind ---------------- */
@@ -3171,9 +3174,11 @@ function closeSheet() { $('sheet').hidden = true; $('sheetBackdrop').hidden = tr
 $('locBtn').addEventListener('click', openSheet);
 $('sheetClose').addEventListener('click', closeSheet);
 $('sheetBackdrop').addEventListener('click', closeSheet);
-function setLocation(loc) {
-  state.loc = loc; state.rainModel = 'harmonie';
-  try { localStorage.setItem('regen.loc', JSON.stringify(loc)); } catch (e) {}
+const saveLoc = () => { try { localStorage.setItem('regen.loc', JSON.stringify(state.loc)); localStorage.setItem('regen.follow', state.follow ? '1' : '0'); } catch (e) {} };
+/* a place chosen from the list stays put; only "Volg mijn locatie" (locate) passes follow */
+function setLocation(loc, follow = false) {
+  state.loc = loc; state.follow = follow; state.rainModel = 'harmonie';
+  saveLoc(); geoSync();
   closeSheet();
   state.nowcast = null; state.forecast = null; state.ecmwf = null; state.updated = null; render();
   load();
@@ -3195,12 +3200,67 @@ $('searchForm').addEventListener('submit', async ev => {
     }
   } catch (e) { const li = h('li'); li.appendChild(h('button', null, `Zoeken mislukt: ${e.message}`)); list.appendChild(li); }
 });
-$('geoBtn').addEventListener('click', () => {
-  if (!navigator.geolocation) { toast('Geolocatie niet beschikbaar'); return; }
-  navigator.geolocation.getCurrentPosition(
-    pos => setLocation({ name: 'Huidige locatie', admin: `${pos.coords.latitude.toFixed(3)}, ${pos.coords.longitude.toFixed(3)}`, lat: pos.coords.latitude, lon: pos.coords.longitude }),
-    err => toast(`Locatie niet beschikbaar: ${err.message}`), { timeout: 10000, maximumAge: 300000 });
-});
+/* ---- Volg mijn locatie (v33). With this on, the place is where you are: asked when the app opens and every
+   time you come back to it (a website cannot follow you in the background), and the weather is loaded again
+   once you are HERE_MOVE_KM further. A place picked from the list switches it off.
+   Coordinates always become the name of the nearest place: inside the Netherlands the woonplaats you are in,
+   from PDOK (Kadaster); elsewhere the town from BigDataCloud. Both get the position rounded to 3 decimals
+   (about 100 m). Without a name: "Mijn locatie", and the name is asked again next time. ---- */
+const HERE_MOVE_KM = 2, HERE_EVERY = 2 * 60e3;
+const placeUrlNl = (lat, lon) => `https://api.pdok.nl/bzk/locatieserver/search/v3_1/reverse?lat=${lat.toFixed(3)}&lon=${lon.toFixed(3)}&type=woonplaats&rows=1&distance=1000&fl=woonplaatsnaam,provincienaam,afstand`;
+const placeUrlWorld = (lat, lon) => `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat.toFixed(3)}&longitude=${lon.toFixed(3)}&localityLanguage=nl`;
+function placeFromPdok(json) { // only the woonplaats you are in (afstand 0): across the border PDOK names the nearest Dutch one, km away
+  const d = json && json.response && json.response.docs && json.response.docs[0];
+  return d && d.woonplaatsnaam && d.afstand <= 250 ? { name: d.woonplaatsnaam, admin: d.provincienaam || '' } : null;
+}
+function placeFromWorld(json) {
+  const name = json && (json.city || json.locality);
+  return name ? { name, admin: json.principalSubdivision || '' } : null;
+}
+async function placeName(lat, lon) {
+  try { const p = placeFromPdok(await fetchOk(placeUrlNl(lat, lon))); if (p) return p; } catch (e) {}
+  try { return placeFromWorld(await fetchOk(placeUrlWorld(lat, lon))); } catch (e) { return null; }
+}
+/* what to do with a new position: 'move' = load the weather for it, 'name' = same spot, still without a name, 'keep' = nothing */
+function hereStep(cur, lat, lon) {
+  if (!cur.here || haversineKm(cur.lat, cur.lon, lat, lon) >= HERE_MOVE_KM) return 'move';
+  return cur.named ? 'keep' : 'name';
+}
+const here = { busy: false, at: 0 };
+function locate(manual) {
+  if (!navigator.geolocation) { if (manual) toast('Je locatie is op dit apparaat niet beschikbaar'); return; }
+  if (here.busy) return;
+  here.busy = true; here.at = Date.now();
+  navigator.geolocation.getCurrentPosition(async pos => {
+    try {
+      const lat = pos.coords.latitude, lon = pos.coords.longitude, cur = state.loc, step = hereStep(cur, lat, lon);
+      if (step === 'keep') { state.follow = true; saveLoc(); geoSync(); if (manual) closeSheet(); render(); return; }
+      const place = await placeName(lat, lon);
+      const named = { name: place ? place.name : 'Mijn locatie', admin: place ? place.admin : '', here: true, named: !!place };
+      if (step === 'move') setLocation({ ...named, lat, lon }, true);
+      else { state.loc = { ...named, lat: cur.lat, lon: cur.lon }; state.follow = true; saveLoc(); geoSync(); if (manual) closeSheet(); render(); } // only the name is new: nothing to load
+    } finally { here.busy = false; }
+  }, err => {
+    here.busy = false;
+    if (manual) toast(err.code === 1 ? 'Geen toestemming voor je locatie. Sta die toe bij de instellingen van je browser.' : 'Je locatie is nu niet te bepalen');
+  }, { timeout: 10000, maximumAge: 120000 });
+}
+/* the button in the location sheet says whether the place follows you */
+function geoSync() {
+  const b = $('geoBtn'), on = !!state.follow;
+  b.classList.toggle('on', on); b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  $('geoLabel').textContent = on ? 'Volgt je locatie' : 'Volg mijn locatie';
+  $('geoHint').textContent = on ? (state.loc.here ? state.loc.name : 'aan') : '';
+}
+$('geoBtn').addEventListener('click', () => locate(true));
+/* at start: follow if that is on; a place saved by the old button ("Huidige locatie", with coordinates for a
+   name) was meant as where you are, so it follows from now on and gets its name */
+function hereBoot() {
+  if (state.loc.name === 'Huidige locatie' && !state.loc.here) { state.loc = { ...state.loc, here: true, named: false }; state.follow = true; saveLoc(); }
+  geoSync();
+  if (state.follow) locate(false);
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && state.follow && Date.now() - here.at > HERE_EVERY) locate(false); });
 let toastTimer = null;
 function toast(msg) { const t = $('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 2500); }
 let resizeTimer = null;
@@ -4088,6 +4148,25 @@ function runTests() {
       try { scrollJump(200); ok(!ptrStart(100, 200), 'niet als de pagina naar beneden gescrold is'); } finally { spacer.remove(); toTop(); }
     } finally { nav.stack = savedNav; ptr.reload = savedReload; ptr.busy = false; ptr.on = false; ptr.engaged = false; ptrHide(); }
   });
+  test('v33: volg mijn locatie: plaatsnaam uit PDOK of BigDataCloud; pas opnieuw laden na 2 km; pijltje achter de naam', () => {
+    const pd = (naam, prov, afstand) => ({ response: { numFound: 1, docs: [{ woonplaatsnaam: naam, provincienaam: prov, afstand }] } });
+    eq(placeFromPdok(pd('Wijk bij Duurstede', 'Utrecht', 0)).name, 'Wijk bij Duurstede'); eq(placeFromPdok(pd('Utrecht', 'Utrecht', 0)).admin, 'Utrecht');
+    eq(placeFromPdok(pd('Putte', 'Noord-Brabant', 15066)), null, 'over de grens: niet de dichtstbijzijnde Nederlandse plaats op 15 km');
+    eq(placeFromPdok({ response: { docs: [] } }), null); eq(placeFromPdok(null), null);
+    eq(placeFromWorld({ city: 'Antwerpen', locality: 'Historisch Centrum', principalSubdivision: 'Vlaams Gewest' }).name, 'Antwerpen', 'de stad, niet de wijk');
+    eq(placeFromWorld({ city: '', locality: 'Anjum', principalSubdivision: 'Friesland' }).name, 'Anjum', 'zonder stad: het dorp'); eq(placeFromWorld({}), null);
+    ok(placeUrlNl(52.123456, 5.987654).includes('lat=52.123&lon=5.988'), 'positie afgerond op 3 decimalen'); ok(placeUrlWorld(52.123456, 5.987654).includes('latitude=52.123&longitude=5.988'));
+    eq(hereStep({ lat: 52, lon: 5 }, 52, 5), 'move', 'een gekozen plaats: eerste keer volgen laadt je eigen plek');
+    eq(hereStep({ lat: 52, lon: 5, here: true, named: true }, 52.005, 5), 'keep', '550 m verder: niets'); eq(hereStep({ lat: 52, lon: 5, here: true, named: true }, 52.03, 5), 'move', '3,3 km verder: opnieuw laden');
+    eq(hereStep({ lat: 52, lon: 5, here: true, named: false }, 52.001, 5), 'name', 'zelfde plek zonder naam: alleen de naam ophalen');
+    const saved = { l: state.loc, f: state.follow, t: state.tab, n: nav.stack };
+    try {
+      nav.stack = []; state.tab = 'overview'; state.loc = { name: 'Breda', admin: 'Noord-Brabant', lat: 51.59, lon: 4.78, here: true, named: true }; state.follow = true; render(); geoSync();
+      ok($('title').querySelector('.here'), 'pijltje achter de naam'); eq($('title').textContent, 'Breda'); ok($('title').querySelector('button').getAttribute('aria-label').includes('je locatie'));
+      eq($('geoLabel').textContent, 'Volgt je locatie'); eq($('geoHint').textContent, 'Breda'); eq($('geoBtn').getAttribute('aria-pressed'), 'true');
+      state.follow = false; render(); geoSync(); ok(!$('title').querySelector('.here'), 'gekozen plaats: geen pijltje'); eq($('geoLabel').textContent, 'Volg mijn locatie');
+    } finally { state.loc = saved.l; state.follow = saved.f; state.tab = saved.t; nav.stack = saved.n; render(); geoSync(); }
+  });
   test('v24: Info als vragen die dicht beginnen, met alle tekst; brontabel; Beaufort', () => {
     const saved = state.errors;
     try {
@@ -4205,5 +4284,6 @@ const params = new URLSearchParams(location.search);
 if (params.get('theme')) document.documentElement.setAttribute('data-theme', params.get('theme'));
 render();
 load();
-if (params.get('test') === '1') setTimeout(runTests, 0);
+if (params.get('test') === '1') { geoSync(); setTimeout(runTests, 0); } else hereBoot(); // the self-tests do not ask where you are
+
 })();
