@@ -339,12 +339,22 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   --card: rgba(255, 255, 255, 0.085);
 }
 .screen.sky.sheetpage .card, .screen.sky.sheetpage .hero, .screen.sky.sheetpage .stat { -webkit-backdrop-filter: none; backdrop-filter: none; }
-.screen.sky.sheetpage .top { padding-top: 24px; text-shadow: none; }
-.screen.sky.sheetpage .top::before { /* the grabber: this sheet can be pulled down */
+.screen.sky.sheetpage .top { padding-top: 26px; text-shadow: none; }
+/* v32: no "‹ Overzicht" row on a sheet: pulling it down closes it. The back button is still there, as the
+   grabber: the bar at the top edge. A tap on it closes the sheet too, for a mouse, a keyboard and a screen
+   reader (its aria-label says where it goes back to); its icon and word are not shown. */
+.screen.sky.sheetpage .back-btn {
+  position: absolute; left: 50%; top: 0; width: 96px; height: 24px; margin: 0 0 0 -48px; padding: 0;
+  border-radius: var(--r-chip); background: none;
+}
+.screen.sky.sheetpage .back-btn .ico, .screen.sky.sheetpage .back-btn span { display: none; }
+.screen.sky.sheetpage .back-btn::after {
   content: ""; position: absolute; left: 50%; top: 8px; width: 36px; height: 5px; margin-left: -18px;
   border-radius: 3px; background: rgba(255, 255, 255, 0.36);
 }
-.screen.sky.sheetpage .info-btn { top: 24px; }
+.screen.sky.sheetpage .back-btn:active::after { background: rgba(255, 255, 255, 0.6); }
+.screen.sky.sheetpage h1 { margin-top: 0; }
+.screen.sky.sheetpage .info-btn { top: 26px; }
 .phone.navving .screen { pointer-events: none; } /* no taps on a page that is still sliding */
 
 /* ---------- week ---------- */

@@ -361,3 +361,11 @@ Proefversie om te vergelijken met versie 30 op main (pagina's die van rechts ins
 ## Versie 31: het blad van onder is de keuze
 
 Ima heeft de twee varianten naast elkaar gelegd en voor het blad gekozen: `ux/blad-van-onder` staat nu op main. De variant waarin pagina's van rechts inschuiven is bewaard op de branch `ux/van-rechts` (niet uitgerold). Cache v31.
+
+## Versie 32: geen "‹ Overzicht" meer op een blad
+
+Op verzoek van Ima: omlaag vegen is duidelijk genoeg, en de rij van de knop kost ruimte.
+
+- **De rij "‹ Overzicht" is weg** op elk blad; de titel staat nu direct onder het greepje (ruim 30 px gewonnen).
+- **De terugknop bestaat nog, als het greepje:** het streepje bovenaan het blad is de knop (`#backBtn`, 96 × 24 px met een raakvlak van 44 px). Een tik erop sluit het blad ook, zodat het met een muis, het toetsenbord en een schermlezer kan ("Terug naar Overzicht" als aria-label); Esc werkt ook. Icoon en woord worden niet getoond.
+- Cache v32. Zelftests: 89 (ongewijzigd: de knop zit nog in de kop en zegt waarheen).
