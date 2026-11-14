@@ -213,14 +213,15 @@ function skyColor(alt, pal) {
   if (alt >= SUN_ASTRO) return mix(dawn, night, 0.9 + 0.1 * ((-alt - 12) / 6));
   return night;
 }
+const tokenStyle = () => getComputedStyle($('screen') || document.documentElement); // the pages have tokens of their own (glass over the sky)
 function skyPalette() {
-  const cs = getComputedStyle(document.documentElement);
+  const cs = tokenStyle();
   const get = (n, fb) => hexToRgb(cs.getPropertyValue(n) || fb);
   return { day: get('--sky-day', '#fffaeb'), dawn: get('--sky-dawn', '#fde8cf'), night: get('--sky-night', '#e4e7f1'), cloud: get('--sky-cloud', '#d8dae0') };
 }
 /* Grey for cloud cover: light grey when clear, dark grey when overcast (inverted in dark mode via tokens). */
 function cloudGrey(pct) {
-  const cs = getComputedStyle(document.documentElement);
+  const cs = tokenStyle();
   const lo = hexToRgb(cs.getPropertyValue('--cloud-lo') || '#c9cbd1'), hi = hexToRgb(cs.getPropertyValue('--cloud-hi') || '#4b4c52');
   const c = mix(lo, hi, clamp(pct, 0, 100) / 100);
   return `rgb(${c[0]},${c[1]},${c[2]})`;
@@ -1295,9 +1296,9 @@ function render() {
   c.classList.toggle('ov', placeTitle);
   const screen = $('screen');
   // UX-audit C2: the sky of now behind the header of Overzicht
-  const sky = placeTitle;
-  screen.classList.toggle('sky', sky);
-  if (sky) screen.style.setProperty('--sky-now', skyNow()); else screen.style.removeProperty('--sky-now');
+  // v30: every page is glass over the living sky (app.css, .screen.sky), not only Overzicht
+  screen.classList.add('sky');
+  if (placeTitle) screen.style.setProperty('--sky-now', skyNow()); else screen.style.removeProperty('--sky-now');
   const keepScroll = screen.scrollTop; // rebuilding the content must not move the page
   const minH = c.offsetHeight; c.style.minHeight = minH + 'px';
   c.textContent = '';
@@ -2515,6 +2516,7 @@ const SKY_DEMO = {
   sneeuw: { alt: 15, cloud: 0.9, snow: 1, wind: 8 }, onweer: { alt: 12, cloud: 1, rain: 6, thunder: true, wind: 30 },
   mist: { alt: 10, cloud: 0.7, fog: true, wind: 3 }, storm: { alt: 25, cloud: 0.75, wind: 85 },
 };
+const SKY_DIM = { overview: 0, info: 0.5 }; // how far the sky is dimmed behind a page: not on Overzicht, most behind the text of Info, 0.4 elsewhere
 let skyDemo = SKY_DEMO[new URLSearchParams(location.search).get('weer')] || null;
 /* what the sky has to show now: measured where there is a reading, else the model's current hour */
 function skyScene(now = new Date()) {
@@ -2577,7 +2579,7 @@ function skyColors(sc) {
 const fxRand = seed => () => { seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
 const FX = { cv: null, ctx: null, w: 0, h: 0, dpr: 1, sc: null, key: '', col: null, t: 0, last: 0, raf: 0, R: fxRand(3),
   stars: [], sprites: [], clouds: [], rain: [], splash: [], glass: [], trail: [], snow: [], settled: [], fog: [],
-  bolt: null, flash: 0, nextBolt: 3, shoot: null, nextShoot: 6, rects: [], rectsAt: -1, glassAt: 0, slant: 0, drift: 0,
+  dim: 0, dimTo: 0, bolt: null, flash: 0, nextBolt: 3, shoot: null, nextShoot: 6, rects: [], rectsAt: -1, glassAt: 0, slant: 0, drift: 0,
   dropSprite: null, fogSprite: null };
 function fxCanvas(w, h) { const cv = document.createElement('canvas'); cv.width = w; cv.height = h; return cv; }
 /* a cloud: soft puffs along a base line, darker underneath */
@@ -2664,13 +2666,13 @@ function skyBuild() {
 /* the top edges of the cards, in canvas coordinates: where rain splashes and snow settles */
 function skyRects() {
   FX.rectsAt = FX.t;
-  if (state.tab !== 'overview') { FX.rects = []; return; }
   const p = $('phone').getBoundingClientRect();
-  FX.rects = [...$('content').querySelectorAll('.card')].map(el => { const r = el.getBoundingClientRect(); return { l: r.left - p.left + 12, r: r.right - p.left - 12, t: r.top - p.top }; }).filter(r => r.t > 0 && r.t < FX.h);
+  FX.rects = [...$('content').querySelectorAll('.card, .hero, .stat')].map(el => { const r = el.getBoundingClientRect(); return { l: r.left - p.left + 12, r: r.right - p.left - 12, t: r.top - p.top }; }).filter(r => r.t > 0 && r.t < FX.h);
 }
 const fxHit = (x, y0, y1) => { for (const r of FX.rects) if (x > r.l && x < r.r && y0 < r.t && y1 >= r.t) return r; return null; };
 function skyStep(dt) {
   const sc = FX.sc, R = FX.R, w = FX.w, h = FX.h; FX.t += dt;
+  FX.dim += (FX.dimTo - FX.dim) * Math.min(1, dt * 4.5); // the light goes down a little when a page with charts opens
   const wet = sc.rain > 0 || sc.snow > 0;
   if (wet && (FX.rectsAt < 0 || FX.t - FX.rectsAt > 0.3)) skyRects();
   for (const c of FX.clouds) { c.x += FX.drift * c.v * dt; const cw = 480 * c.k; if (c.x > w + 40) c.x = -cw - 20; else if (c.x < -cw - 40) c.x = w + 20; }
@@ -2805,6 +2807,7 @@ function skyDraw() {
     }
     c.globalCompositeOperation = 'source-over';
   }
+  if (FX.dim > 0.005) { c.fillStyle = `rgba(6,10,24,${FX.dim})`; c.fillRect(0, 0, w, h); } // the weather steps back behind a page with charts; the drops on the glass stay in front
   if (FX.glass.length || FX.trail.length) {
     const sp = FX.dropSprite;
     for (const tr of FX.trail) { c.globalAlpha = 0.7 * tr.life; c.drawImage(sp, tr.x - tr.r, tr.y - tr.r, 2 * tr.r, 2 * tr.r); }
@@ -2816,8 +2819,8 @@ function skyDraw() {
   }
 }
 const skyStill = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
-/* in sight: Overzicht itself, or a picture of it under a page that is opening, closing or being swiped away */
-const skyWanted = () => !!FX.sc && !document.hidden && (state.tab === 'overview' || !!navDone || swipe.engaged);
+/* the sky is behind every page, so it runs whenever the app is in sight */
+const skyWanted = () => !!FX.sc && !document.hidden;
 function skyFrame(ts) {
   FX.raf = 0;
   if (!skyWanted() || skyStill()) return;
@@ -2846,6 +2849,8 @@ function skyUpdate() {
     FX.col = col;
   }
   FX.rectsAt = -1;
+  FX.dimTo = SKY_DIM[state.tab] != null ? SKY_DIM[state.tab] : 0.4;
+  if (skyStill()) FX.dim = FX.dimTo;
   skyDraw(); skyKick();
 }
 document.addEventListener('visibilitychange', skyKick);
@@ -2896,7 +2901,7 @@ function popTo(depth) {
    The page that is not live is a picture of it: a copy of the screen as it stood (snapPage), with its scroll
    positions, that cannot be touched. So render() keeps drawing into the one live screen. */
 const MOTION = { page: 220, fast: 150, ease: 'cubic-bezier(.2,.8,.2,1)', push: 420, pushEase: 'cubic-bezier(.32,.72,0,1)', quiet: false }; // = --dur-page, --dur-fast, --ease, --dur-push and --ease-push in app.css
-const UNDER = { shift: 30, dim: 0.6 }; // the page underneath: 30 % to the left and at 60 % when fully covered
+const UNDER = { shift: 30, dim: 0 }; // the page underneath: 30 % to the left and faded away when fully covered (pages are glass: the sky stays, the content changes)
 const motionOk = () => !matchMedia('(prefers-reduced-motion: reduce)').matches && !!$('screen').animate;
 function snapPage() {
   const s = $('screen'), el = s.cloneNode(true), scrolls = [[el, 0, s.scrollTop]];
@@ -4099,7 +4104,7 @@ function runTests() {
       { const a = skyColors({ alt: 30, cloud: 0, rain: 0 }), b = skyColors({ alt: 30, cloud: 1, rain: 4 }), n = skyColors({ alt: -30, cloud: 0, rain: 0 });
         ok(a.g[0][2] > a.g[0][0] + 60, 'heldere dag is blauw'); ok(Math.abs(b.g[0][2] - b.g[0][0]) < 40, 'regenlucht is grijs'); ok(n.g[0].every(v => v < 30), 'nacht is donker');
         const s = skyScene(); ok(s.cloud >= 0 && s.cloud <= 1 && s.rain >= 0 && s.wind >= 0, 'het weer van nu als tafereel'); } ok(!document.querySelector('.tabbar, .tab'), 'geen tabbalk');
-      state.tab = 'wind'; render(); ok(!$('screen').classList.contains('sky'), 'lucht alleen op Overzicht');
+      state.tab = 'wind'; render(); ok($('screen').classList.contains('sky') && getComputedStyle($('screen')).backgroundColor === 'rgba(0, 0, 0, 0)', 'de lucht blijft achter elke pagina'); eq(getComputedStyle($('title')).color, 'rgb(255, 255, 255)', 'ook Wind is glas met witte tekst'); ok(!$('screen').style.getPropertyValue('--sky-now'), 'luchtkleur van de kop alleen op Overzicht');
       state.tab = 'info'; render(); ok(!$('content').querySelector('input[type="checkbox"]'), 'geen proefschakelaar meer');
     } finally {
       state.forecast = saved.f; state.obs = saved.o; state.ens = saved.e; state.ecmwf = saved.c; state.tab = saved.t; nav.stack = saved.n;

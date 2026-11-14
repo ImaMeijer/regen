@@ -330,3 +330,14 @@ Op verzoek van Ima, naar het voorbeeld van Apple Weer: het weer van nu als beweg
 - **Uitproberen:** `?weer=` met `helder`, `nacht`, `avond`, `schemer`, `halfbewolkt`, `bewolkt`, `regen`, `bui`, `nachtregen`, `sneeuw`, `onweer`, `mist` of `storm` toont dat weer, wat het ook echt doet.
 - Niet gemeten: de beeldsnelheid op een iPhone (het glas over een bewegende achtergrond is het zwaarste deel).
 - Cache v29. Zelftests: 89 (uitgebreid: het canvas ligt onder de pagina, witte tekst op Overzicht in elk thema, luchtkleuren voor dag, regen en nacht).
+
+## Versie 30: de lucht blijft achter elke pagina
+
+Op verzoek van Ima: de achtergrond verdween zodra je iets opende.
+
+- **Elke pagina is glas:** Regen, Per uur, de dagen, Wind en Info hebben geen eigen achtergrond meer; `render()` geeft het scherm op elke pagina `.sky`. Witte tekst, doorzichtige kaarten (ook `.hero` en `.stat`), het vlak van een grafiek half doorzichtig met eigen dag- en nachttinten. Het lichte thema bestaat daardoor alleen nog voor het locatieblad, de tooltip en de melding.
+- **De lucht stapt terug achter een pagina met grafieken (`FX.dim`, `SKY_DIM`):** 40% donkerder (Info 50%), in een kwart seconde, zodat lijnen en cijfers leesbaar blijven; de druppels op het glas blijven ervoor. Regen spat en sneeuw ligt nu op de kaarten van elke pagina.
+- **Overgangen:** de lucht blijft staan en alleen de inhoud beweegt. De nieuwe pagina schuift van rechts in, de vorige schuift 30% naar links en vervaagt helemaal (was: dimmen tot 60%); geen schaduwrand meer. Terug en terugvegen omgekeerd.
+- `skyPalette` en `cloudGrey` lezen de kleuren nu van het scherm (`tokenStyle`), niet van de pagina als geheel.
+- De animatie loopt nu op elke pagina zolang de app zichtbaar is.
+- Cache v30. Zelftests: 89 (aangepast: de lucht blijft achter Wind, met witte tekst).
