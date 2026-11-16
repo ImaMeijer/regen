@@ -379,3 +379,67 @@ Op verzoek van Ima: de plaats moest telkens met de hand worden aangepast.
 - **Oude "Huidige locatie":** een plek die met de oude knop was opgeslagen (met coördinaten als naam) gaat vanaf nu volgen en krijgt een naam.
 - De zelftests vragen je locatie niet.
 - Cache v33. Zelftests: 90 (nieuw: plaatsnaam uit beide diensten, afronding, wanneer er opnieuw geladen wordt, pijltje en knop).
+
+## Versie 34: het dagicoontje uit een bewolkingsscore, niet meer uit de mediaan
+
+Op verzoek van Ima (16 november 2026): het dagicoontje in Overzicht moet zeggen hoe bewolkt de dag als geheel was. Alleen het dagicoontje verandert. De icoontjes per uur, het icoontje van nu en de kans onder het dagicoontje zijn ongewijzigd.
+
+### De oude situatie (versie 19 tot en met 33)
+
+- Alleen de lichte uren van de dag telden (`isLightHour`); elk uur kreeg zijn uuricoontje (`hourKind`, voor een ECMWF-lid `memberKind`).
+- De dag kreeg de **mediaan** van die uren in de volgorde zonnig < half bewolkt < dunne bewolking < bewolkt < regen (`medianKind`). Bij een even aantal uren het gemiddelde van de twee middelste, halven naar boven.
+- ECMWF-dagen: per lid dezelfde mediaan over de uren, daarna de mediaan over de dagicoontjes van de leden.
+
+Wat daar mis mee was:
+
+- **De mediaan kijkt alleen naar het middelste uur**, niet naar hoeveel bewolking er was. 5 uur zon en 4 uur bewolkt gaf een zon, terwijl bijna de halve dag dicht was.
+- **Het gemiddelde van de twee middelste verzon een icoontje.** 5 uur zon en 5 uur bewolkt gaf dunne bewolking, net als 10 uur half bewolkt + 8 uur bewolkt + 2 uur regen. Dunne bewolking kwam die dag niet één keer voor.
+
+### De nieuwe situatie (`dayKindOf`)
+
+Stap 0 is ongewijzigd: alleen de lichte uren, elk met zijn uuricoontje. Daarna:
+
+1. **Regen:** regent het in minstens de helft van de lichte uren, dan is de dag regen. Minder regenuren tellen verder mee als bewolkt.
+2. **Bewolkingsscore:** elk uur krijgt een gewicht (`DAY_COVER`): zonnig 0%, half bewolkt 50%, dunne bewolking 75%, bewolkt 100%, regen 100%. De score is het gemiddelde over de lichte uren.
+3. **Van score naar icoontje:** onder 25% zonnig (`DAY_SUNNY`), vanaf 65% bewolkt (`DAY_CLOUDY`), daartussen half bewolkt.
+4. **Half bewolkt moet echt zijn voorgekomen:** alleen bij minstens 2 uur half bewolkt of dunne bewolking (`DAY_PARTLY_MIN`). Anders beslist de score tussen de twee uitersten: onder 50% zonnig, vanaf 50% bewolkt.
+5. **Dunne bewolking:** is de uitkomst bewolkt en waren er meer uren dunne bewolking dan bewolkt en regen samen, dan wordt het dunne bewolking. Dunne bewolking kan niet meer als gemiddelde van twee andere icoontjes ontstaan.
+
+**ECMWF-dagen:** per lid stap 0 tot en met 5 (`memberDay`). Over de leden wint nog steeds het middelste dagicoontje (`middleKind`); bij een even aantal leden het bewolktere van de twee middelste in plaats van hun gemiddelde. De score werkt dus alleen binnen een lid. Over de leden wordt niets opgeteld, omdat elk lid een dag is die echt zo kan verlopen; alle uren van alle leden op één hoop geeft een gemiddelde dag die in geen enkel lid voorkomt.
+
+| Lichte uren | Score | Oud | Nieuw |
+|---|---|---|---|
+| 3 zon, 2 half, 2 bewolkt, 2 regen | 56% | half bewolkt | half bewolkt |
+| 4 zon, 3 half, 3 bewolkt | 45% | half bewolkt | half bewolkt |
+| 10 half, 8 bewolkt, 2 regen | 75% | dunne bewolking | **bewolkt** |
+| 6 zon, 5 bewolkt | 45% | zonnig | zonnig (geen uur half bewolkt) |
+| 5 zon, 4 bewolkt | 44% | zonnig | zonnig (geen uur half bewolkt) |
+| 5 zon, 5 bewolkt | 50% | dunne bewolking | **bewolkt** |
+| 3 zon, 1 half, 7 bewolkt | 68% | bewolkt | bewolkt |
+| 7 zon, 1 half, 3 bewolkt | 32% | zonnig | zonnig (maar 1 uur half bewolkt) |
+| 5 zon, 2 half, 4 bewolkt | 45% | half bewolkt | half bewolkt |
+| 7 zon, 2 bewolkt (trekt laat dicht) | 22% | zonnig | zonnig |
+
+### De keuzes, en waarom
+
+- **Een score in plaats van de mediaan** (Ima): half bewolkt telt voor de helft, bewolkt en regen voor heel. Zo telt elk uur mee en niet alleen het middelste.
+- **Vaste grenzen (25 en 65%).** 65% is zo gekozen dat een dag die voor twee derde dicht zit bewolkt heet; 25% zodat twee bewolkte uren op negen een zonnige dag niet half bewolkt maken (de regel uit versie 19 dat laat dichttrekken de dag zonnig houdt, blijft zo gelden).
+- **Half bewolkt alleen als het is voorgekomen** (Ima: "6 zon en 5 bewolkt zou niet half bewolkt moeten geven"). Aanname van Claude, door Ima niet apart bevestigd: zo'n dag is zonnig, omdat de zon de meeste uren had.
+- **Minstens 2 uur, niet 1.** Een eerdere versie van het voorstel koos het icoontje dat die dag voorkwam en het dichtst bij de score lag. Dan liet één uur half bewolkt de dag kantelen (3 zon, 1 half, 7 bewolkt gaf half bewolkt bij 68%), en de grenzen verschoven per dag. Verworpen.
+- **Gelijke stand:** precies 50% zonder half bewolkte uren wordt bewolkt; bij een even aantal leden wint het bewolktere. De app belooft liever niet te snel zon.
+- **Dunne bewolking als eigen stap, niet als punt op de schaal.** Het is een ander soort lucht (een sluier), geen tussenstand. Het gewicht van 75% (dicht, maar er komt zon door) telt alleen mee in de score.
+- **Regen houdt zijn drempel** (minstens de helft van de lichte uren), vrijwel wat de mediaan deed.
+- **Verstreken uren van vandaag blijven zoals ze waren:** Open-Meteo overschrijft ze bij elke modelrun met de run die op dat uur begon, dus het dagicoontje van vandaag schuift in de loop van de dag naar hoe de dag echt was (16 november: 's ochtends regen, 's avonds half bewolkt). Vastzetten op de laatste verwachting is overwogen en door Ima afgewezen: het icoontje van nu volgt ook de waarneming.
+
+### Wat nog niet is opgelost of getoetst
+
+- **De getallen zijn bedacht op voorbeelden**, niet getoetst op echte dagen: de grenzen 25 en 65%, het gewicht 75% voor dunne bewolking en het minimum van 2 uur.
+- **Een paar uur zware regen op een verder zonnige dag** geeft nog steeds geen regenicoontje (4 uur regen en 5 uur zon: zonnig). De kans onder het icoontje moet dat blijven vertellen.
+- **Het middelste lid is niet het vaakst voorkomende.** Op een verdeelde dag (zaterdag 21 november: 23 leden zon of half bewolkt, 18 regen, 9 bewolkt) wint bewolkt omdat het tussen de kampen in ligt.
+- **Alle lichte uren tellen even zwaar**, ook het uur vlak na zonsopkomst.
+- Het uuricoontje van een ECMWF-dagpagina is nog de mediaan over de leden, met het gemiddelde bij een even aantal (`medianKind`, `ecmwfHours`).
+
+De week van 16 november 2026 voor Amsterdam, oud tegen nieuw: alleen zaterdag veranderde (half bewolkt werd bewolkt); vandaag, morgen en de vier andere ECMWF-dagen hielden hun icoontje.
+
+- Info legt de nieuwe regel uit bij "weerbeeld van een dag".
+- Cache v34. Zelftests: 91 (nieuw: de dagregel met alle voorbeelden hierboven, de grenzen, regen, dunne bewolking en het middelste lid; de mediaantest heet nu naar het ECMWF-uuricoon).
