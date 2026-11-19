@@ -453,6 +453,7 @@ function tempColor(v) {
   return `rgb(${last.join(',')})`;
 }
 
+const TIP_GAP = 6; // px between the scrub readout and the top of the card it belongs to
 const tooltipEl = () => $('tooltip');
 function hideTooltip() { const t = tooltipEl(); if (t) t.hidden = true; }
 
@@ -801,8 +802,12 @@ function drawChart(host, spec) {
     const cx = rect.left + anchorX * scale, cy = rect.top + anchorY * scale;
     const tw = tip.offsetWidth, th = tip.offsetHeight;
     let left = clamp(cx - tw / 2, 8, window.innerWidth - tw - 8);
-    let top = cy - th - 12;
-    if (top < 8) top = cy + 16;
+    // v35: the readout sits above the whole card, so it covers neither the card's title nor the weather icons
+    // over the plot; it still follows the finger sideways. Without room above the card (scrolled to the top
+    // of the screen) it falls back to just above the point, or under it.
+    const box = (host.closest('.card') || host).getBoundingClientRect();
+    let top = box.top - th - TIP_GAP;
+    if (top < 8) { top = cy - th - 12; if (top < 8) top = cy + 16; }
     tip.style.left = `${left}px`; tip.style.top = `${top}px`;
     return point;
   }
@@ -3902,6 +3907,23 @@ function runTests() {
     ok(nowTick && nowTick.textContent === '20:04', 'nu-label 20:04');
     ok(!ticks.includes('20:00'), '20:00 weggelaten (te dicht bij nu)'); ok(ticks.includes('20:30'), '20:30 blijft');
     host.remove();
+  });
+  test('v35: het balkje bij het scrubben staat boven de kaart, niet over de titel en de icoontjes', () => {
+    const wrap = h('div'); wrap.style.cssText = 'position:fixed;left:0;top:240px;width:360px';
+    const k = card('Per uur', []); wrap.appendChild(k.el); document.body.appendChild(wrap);
+    const t0 = new Date(2026, 9, 31, 20, 0);
+    const pts = Array.from({ length: 24 }, (_, i) => ({ t: new Date(t0.getTime() + i * MIN5), tEnd: new Date(t0.getTime() + (i + 1) * MIN5), v: i % 5 }));
+    drawChart(k.body, { tMin: t0, tMax: new Date(t0.getTime() + 2 * HOUR), ticks: 'nowcast', unit: 'mm', series: [{ kind: 'bar', name: 'Neerslag', color: 'red', points: pts }], fmt: fmtMm, tipTime: p => fmtTime(p.t), yOpts: { zero: true } });
+    const scrub = () => { const hit = k.body.querySelector('rect.hit'), r = hit.getBoundingClientRect(); hit.dispatchEvent(new PointerEvent('pointermove', { clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, bubbles: true })); return tooltipEl().getBoundingClientRect(); };
+    try {
+      let tip = scrub(), box = k.el.getBoundingClientRect();
+      ok(!tooltipEl().hidden, 'balkje zichtbaar'); ok(tip.height > 0 && tip.bottom <= box.top, `onderkant ${tip.bottom} boven de kaart (${box.top})`);
+      near(box.top - tip.bottom, TIP_GAP, 0.5, 'met een kleine marge');
+      ok(tip.bottom < k.el.querySelector('h2').getBoundingClientRect().top, 'vrij van de titel');
+      wrap.style.top = '0px'; // geen ruimte boven de kaart: terug naar vlak boven of onder het punt
+      tip = scrub(); box = k.el.getBoundingClientRect();
+      ok(tip.top >= 8, 'blijft in beeld'); ok(tip.bottom > box.top, 'dan over de kaart');
+    } finally { hideTooltip(); wrap.remove(); }
   });
   test('overzicht: temperatuurkleur loopt van blauw naar rood, icoontjes volgen weer en dag/nacht', () => {
     ok(tempColor(-20).startsWith('rgb(79'), 'koud = blauw'); ok(tempColor(40).startsWith('rgb(227'), 'heet = rood');

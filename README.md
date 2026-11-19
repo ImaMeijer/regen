@@ -443,3 +443,13 @@ De week van 16 november 2026 voor Amsterdam, oud tegen nieuw: alleen zaterdag ve
 
 - Info legt de nieuwe regel uit bij "weerbeeld van een dag".
 - Cache v34. Zelftests: 91 (nieuw: de dagregel met alle voorbeelden hierboven, de grenzen, regen, dunne bewolking en het middelste lid; de mediaantest heet nu naar het ECMWF-uuricoon).
+
+## Branch `ux/scrub-balkje-hoger` (versie 35): het balkje bij het scrubben staat boven de kaart
+
+Feedback uit de testweek (opname van 19 november 2026, backlog in de vault): het balkje met tijd en waarde dat verschijnt als je over een grafiek veegt, valt over de titel van de grafiek, en op een dagpagina over de weericoontjes. Voorstel uit het gesprek: het balkje hoger plaatsen.
+
+- **Oude situatie:** het balkje stond 12 px boven het punt dat je aanwees (de top van de staaf of de stip op de lijn), en eronder als het daar niet paste. Bij een hoge lijn of staaf lag het daardoor over de icoontjes boven de grafiek en over de titel van de kaart.
+- **Nieuwe situatie (`showAtTime` in `drawChart`, `TIP_GAP`):** het balkje staat 6 px boven de bovenrand van de hele kaart waarin de grafiek zit, en volgt je vinger nog steeds van links naar rechts. Titel, icoontjes en grafiek blijven vrij. Dat geldt voor alle grafieken, ook de tweede grafiek in dezelfde kaart (neerslag onder temperatuur): het balkje staat dan op dezelfde hoogte.
+- **Keuze: boven de kaart, niet in de kaart.** In de kaart is geen vrije plek: naast de titel past het balkje niet (drie regels hoog, tot ruim 230 px breed) en elke plek in de grafiek dekt icoontjes of gegevens af. Boven de kaart dekt het af wat daar toevallig staat (op een dagpagina een deel van de tegel met de dag, op Regen de tegel "Eerstvolgende neerslag"); dat is niet waar je naar kijkt terwijl je veegt.
+- **Geen ruimte boven de kaart** (de kaart is tot de bovenrand van het scherm gescrold): dan de oude plek, vlak boven het punt of eronder.
+- Cache v35. Zelftests: 92 (nieuw: het balkje staat boven de kaart en vrij van de titel; zonder ruimte blijft het in beeld).
