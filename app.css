@@ -300,6 +300,29 @@ h1 { font-size: var(--t-large); font-weight: 700; letter-spacing: -0.02em; margi
 .hero .sub { font-size: var(--t-title3); font-weight: 600; letter-spacing: -0.01em; line-height: 1.2; margin-top: 2px; }
 .hero .h { font-size: var(--t-foot); color: var(--label-3); margin-top: 2px; }
 .hero .ico-big { width: 36px; height: 36px; color: var(--tint); flex: none; }
+/* v35: the tile as the readout of the charts below it. While a finger scrubs a chart, a second face (.live)
+   lies over the tile with that moment in the same three lines and the same place for the icon; the tile keeps
+   its size. Entering, the tile's own content lifts away and the readout settles from just below; leaving is
+   the reverse and a little slower. The lines never wrap (the least important part is last and may be cut),
+   and the figures are tabular so they do not jitter under the finger. */
+.hero { position: relative; }
+.hero > * { transition: opacity var(--dur-page) var(--ease), transform var(--dur-page) var(--ease); }
+.hero > .live {
+  position: absolute; inset: 0; padding: inherit; display: flex; align-items: center; gap: 12px;
+  opacity: 0; transform: translateY(5px); pointer-events: none;
+}
+.hero .live-ico { flex: none; display: flex; }
+.hero .live-text { flex: 1; min-width: 0; }
+.hero .live .l, .hero .live .big, .hero .live .h { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.hero .live .big { display: flex; align-items: baseline; gap: 8px; }
+.hero .live .big .v { flex: none; }
+.hero .live .big .w { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: var(--t-title3); font-weight: 600; letter-spacing: -0.01em; }
+.hero .live .l { color: var(--label); font-weight: 600; }
+.hero .live .h { color: var(--label-2); }
+.hero.scrub > * { transition-duration: var(--dur-fast); }
+.hero.scrub > :not(.live) { opacity: 0; transform: translateY(-5px); }
+.hero.scrub > .live { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) { .hero > * { transition: none; } .hero > .live, .hero.scrub > :not(.live) { transform: none; } }
 
 /* ---------- table ---------- */
 table { width: 100%; border-collapse: collapse; font-size: var(--t-foot); margin-top: 8px; }

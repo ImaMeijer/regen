@@ -444,12 +444,37 @@ De week van 16 november 2026 voor Amsterdam, oud tegen nieuw: alleen zaterdag ve
 - Info legt de nieuwe regel uit bij "weerbeeld van een dag".
 - Cache v34. Zelftests: 91 (nieuw: de dagregel met alle voorbeelden hierboven, de grenzen, regen, dunne bewolking en het middelste lid; de mediaantest heet nu naar het ECMWF-uuricoon).
 
-## Branch `ux/scrub-balkje-hoger` (versie 35): het balkje bij het scrubben staat boven de kaart
+## Branch `ux/scrub-balkje-hoger` (versie 35): de tegel bovenaan is de uitlezing van de grafiek
 
-Feedback uit de testweek (opname van 19 november 2026, backlog in de vault): het balkje met tijd en waarde dat verschijnt als je over een grafiek veegt, valt over de titel van de grafiek, en op een dagpagina over de weericoontjes. Voorstel uit het gesprek: het balkje hoger plaatsen.
+Feedback uit de testweek (opname van 19 november 2026, backlog in de vault): het witte balkje met tijd en waarde dat verschijnt als je over een grafiek veegt, valt over de titel van de grafiek, en op een dagpagina over de weericoontjes.
 
-- **Oude situatie:** het balkje stond 12 px boven het punt dat je aanwees (de top van de staaf of de stip op de lijn), en eronder als het daar niet paste. Bij een hoge lijn of staaf lag het daardoor over de icoontjes boven de grafiek en over de titel van de kaart.
-- **Nieuwe situatie (`showAtTime` in `drawChart`, `TIP_GAP`):** het balkje staat 6 px boven de bovenrand van de hele kaart waarin de grafiek zit, en volgt je vinger nog steeds van links naar rechts. Titel, icoontjes en grafiek blijven vrij. Dat geldt voor alle grafieken, ook de tweede grafiek in dezelfde kaart (neerslag onder temperatuur): het balkje staat dan op dezelfde hoogte.
-- **Keuze: boven de kaart, niet in de kaart.** In de kaart is geen vrije plek: naast de titel past het balkje niet (drie regels hoog, tot ruim 230 px breed) en elke plek in de grafiek dekt icoontjes of gegevens af. Boven de kaart dekt het af wat daar toevallig staat (op een dagpagina een deel van de tegel met de dag, op Regen de tegel "Eerstvolgende neerslag"); dat is niet waar je naar kijkt terwijl je veegt.
-- **Geen ruimte boven de kaart** (de kaart is tot de bovenrand van het scherm gescrold): dan de oude plek, vlak boven het punt of eronder.
-- Cache v35. Zelftests: 92 (nieuw: het balkje staat boven de kaart en vrij van de titel; zonder ruimte blijft het in beeld).
+### De oude situatie
+
+Een zwevend balkje (`#tooltip`) stond 12 px boven het punt dat je aanwees (de top van de staaf of de stip op de lijn), en eronder als het daar niet paste. Bij een hoge lijn of staaf lag het over de icoontjes boven de grafiek en over de titel van de kaart.
+
+### De nieuwe situatie
+
+Er is geen zwevend balkje meer zolang de tegel bovenaan de pagina in beeld is. De tegel zelf (`.hero`: op een dagpagina "Vrijdag 20 november · 4° tot 7° · bewolkt") wordt de uitlezing van het moment onder je vinger, zoals de kop van een grafiek in Apple Weer.
+
+- **Zelfde plek, zelfde drie regels:** label, grote waarde en hintregel, met het icoontje op dezelfde plaats. De tegel houdt zijn grootte; er verspringt niets.
+- **Dagpagina's en Per uur (`readout` in `renderOverview`):** "Vrijdag 12:00", groot "6°" met het weer in een woord erachter ("dunne bewolking", iets kleiner zodat het op een telefoon past), en het icoontje van dat uur. Eronder de regen van dat uur ("droog" of "0,6 mm regen") en de zon ("zon 18° boven de horizon", in schemer of nacht alleen dat woord). Voor een uur van vandaag dat voorbij is staat er "verwacht, niet gemeten" in plaats van de zon. De temperatuur- en de neerslaggrafiek geven dezelfde uitlezing: het gaat om het uur, niet om welke grafiek je aanraakt.
+- **ECMWF-dagen (`renderEnsDay`):** hetzelfde, met op de hintregel de band van 8 van de 10 berekeningen ("3 tot 6° · 0,0 tot 0,3 mm regen").
+- **Wind:** "Vrijdag 03:00 · 13 km/u · 3 Bft uit OZO · stoten 27 km/u", in de woorden die de tegel ook voor nu gebruikt.
+- **Regen (en elke grafiek zonder eigen `readout`):** wat het balkje zou zeggen (`readoutFromTip`): de tijd als label, de eerste waarde groot, de rest op de hintregel; het eigen icoon van de tegel blijft staan.
+- **Overgang (app.css, `.hero .live`, `.hero.scrub`):** de uitlezing is een tweede laag over de tegel. Bij het aanraken tilt de inhoud van de tegel 5 px op en vervaagt, terwijl de uitlezing van net eronder op zijn plaats komt (150 ms); bij het loslaten andersom en iets trager (220 ms), 1,8 seconde nadat je loslaat, zoals de stippellijn. Tijdens het vegen verandert de tekst direct, zonder animatie, met cijfers van vaste breedte zodat ze niet trillen. Het icoontje wordt alleen opnieuw getekend als het weer verandert. Bij "minder beweging" op het toestel wisselt het zonder animatie.
+- **Tegel niet in beeld** (weggescrold, of een grafiek zonder tegel): dan toch het balkje, nu 6 px boven de bovenrand van de kaart (`TIP_GAP`) in plaats van over titel en icoontjes; zonder ruimte daar de oude plek.
+
+### De keuzes, en waarom
+
+- **De tegel als uitlezing, niet een balkje op een betere plek** (Ima, na een eerste versie met het balkje boven de kaart): elk zwevend balkje dekt iets af; de tegel staat er al, is groot genoeg en staat niet onder je vinger.
+- **Eén uitlezing per uur op een dagpagina**, niet per grafiek: icoon, temperatuur, weer en regen horen bij elkaar.
+- **Regels worden nooit afgebroken naar een tweede regel**, anders zou de tegel onder je vinger van hoogte veranderen. Daarom is de regel over de zon ingekort ("dag · zon 17° boven de horizon" werd "zon 17° boven de horizon", 's nachts "nacht") en staat het minst belangrijke achteraan; op een heel smal scherm valt dat als eerste weg.
+- **Op Wind is de band van het ensemble uit de uitlezing weggelaten** ("8 van de 10: 20 tot 30 km/u"); die staat als band in de grafiek. Op Regen is de regel over de zon weggelaten.
+- **Geen "-0°":** de uitlezing rondt af op hele graden zonder min-nul (`wholeDeg`).
+
+### Wat nog niet is nagekeken
+
+- De overgang is op de computer niet bewegend bekeken (het voorbeeldvenster stond verborgen en tekent dan geen animaties); begin- en eindstand, de teksten op alle pagina's en de hoogte van de tegel zijn wel gecontroleerd. Op een echte telefoon is het nog niet geprobeerd.
+
+- Info noemt de tegel bij "Sleep met één vinger over een grafiek".
+- Cache v35. Zelftests: 93 (nieuw: de tegel als uitlezing met eigen en met algemene uitlezing, loslaten, terugval op het balkje; het balkje boven de kaart).

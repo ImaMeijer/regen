@@ -456,6 +456,57 @@ function tempColor(v) {
 const TIP_GAP = 6; // px between the scrub readout and the top of the card it belongs to
 const tooltipEl = () => $('tooltip');
 function hideTooltip() { const t = tooltipEl(); if (t) t.hidden = true; }
+/* ---- v35: the tile at the top of a page is the readout of the charts below it ----
+   While a finger scrubs a chart, the tile (.hero) shows that moment in its own three lines (label, large
+   value, hint) and with its own icon, instead of a floating bar over the chart. The readout is a second face
+   (.live) laid over the tile, so the tile keeps its size and the two cross-fade (app.css). */
+const heroEl = host => { const k = host.closest('.card'); return (k && k.parentElement && k.parentElement.querySelector(':scope > .hero')) || null; };
+/* The tile of this chart's page when it is in view as a whole; null when there is none or it is scrolled away
+   (then the floating bar is used, above the card). */
+function heroFor(host) {
+  const hero = heroEl(host);
+  if (!hero) return null;
+  const r = hero.getBoundingClientRect(), sc = hero.closest('.screen');
+  const b = sc ? sc.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+  return r.height > 0 && r.top >= b.top - 1 && r.bottom <= b.bottom + 1 ? hero : null;
+}
+/* Show { label, big, word?, hint, kind?, night? } on the tile. With `kind` the icon is the weather of that hour;
+   without, the tile's own icon stays. Text changes at once while scrubbing; only entering and leaving fade. */
+function heroLive(hero, r) {
+  let live = hero.querySelector(':scope > .live');
+  if (!live) {
+    live = h('div', 'live'); live.setAttribute('aria-hidden', 'true');
+    const txt = h('div', 'live-text');
+    for (const cls of ['l', 'big', 'h']) txt.appendChild(h('div', cls));
+    live.appendChild(h('span', 'live-ico')); live.appendChild(txt);
+    hero.appendChild(live);
+    void live.offsetWidth; // lay it out once, so the first fade runs from its resting state
+  }
+  const [ico, txt] = live.children, key = r.kind ? `${r.kind}|${r.night ? 1 : 0}` : 'own';
+  if (ico.dataset.key !== key) { // redraw the icon only when the weather changes, not for every hour
+    ico.dataset.key = key; ico.textContent = '';
+    if (r.kind) {
+      const svg = svgEl('svg', { class: 'ico-big wicon-big', viewBox: '-10 -10 20 20' });
+      svg.appendChild(weatherIcon(0, 0, r.kind, !!r.night)); ico.appendChild(svg);
+    } else { const own = hero.querySelector(':scope > svg'); if (own) ico.appendChild(own.cloneNode(true)); }
+  }
+  txt.children[0].textContent = r.label || ''; txt.children[2].textContent = r.hint || '';
+  // the large line: the value, and after it (smaller, so "6° dunne bewolking" still fits a phone) the weather in a word
+  const big = txt.children[1]; big.textContent = '';
+  big.appendChild(h('span', 'v', r.big || '')); if (r.word) big.appendChild(h('span', 'w', r.word));
+  hero.classList.add('scrub');
+}
+function heroRest(hero) { if (hero) hero.classList.remove('scrub'); }
+/* Without a readout of its own (spec.readout), a chart puts on the tile what its floating bar would say: the
+   time as the label, the first value large, the rest on the hint line. The line about the sun stays out: it
+   would not fit, and on Regen it is not what you look for. */
+function readoutFromTip(tip) {
+  const ts = [...tip.querySelectorAll(':scope > .t:not(.sky)')].map(e => e.textContent), rows = [...tip.querySelectorAll(':scope > .row')];
+  const txt = (row, cls) => row.querySelector(cls).textContent;
+  const up = s => (s ? s[0].toUpperCase() + s.slice(1) : '');
+  return { label: up(ts[0]), big: rows[0] ? txt(rows[0], '.v') : '',
+    hint: [rows[0] && txt(rows[0], '.n'), ...rows.slice(1).map(r => `${txt(r, '.n')} ${txt(r, '.v')}`), ...ts.slice(1)].filter(Boolean).join(' · ') };
+}
 
 /* Hour step for x labels: the smallest of 1/2/3/6/12 h that keeps labels ≥ 44 px apart. */
 function tickStepHours(pxPerHour) {
@@ -754,7 +805,7 @@ function drawChart(host, spec) {
     if (barSeries.length) {
       const base = barSeries[0];
       const p = base.points.find(q => t >= q.t.getTime() && t < q.tEnd.getTime());
-      if (!p) { if (!silent) hideTooltip(); return null; }
+      if (!p) { if (!silent) { hideTooltip(); heroRest(heroEl(host)); } return null; }
       point = p; labelT = p.t;
       anchorX = (x(p.t.getTime()) + x(p.tEnd.getTime())) / 2;
       if (!silent) {
@@ -793,18 +844,22 @@ function drawChart(host, spec) {
     if (silent) return point;
     if (spec.sky) {
       const alt = sunAltitude(new Date(t), spec.sky.lat, spec.sky.lon);
-      tip.appendChild(h('div', 't', `${sunPhase(alt)} · zon ${alt >= 0 ? fmtNum(alt, 0) + '° boven' : fmtNum(-alt, 0) + '° onder'} de horizon`));
+      tip.appendChild(h('div', 't sky', `${sunPhase(alt)} · zon ${alt >= 0 ? fmtNum(alt, 0) + '° boven' : fmtNum(-alt, 0) + '° onder'} de horizon`));
     }
     if (spec.tipExtra) { const ex = spec.tipExtra(t); if (ex) tip.appendChild(h('div', 't', ex)); }
+    // v35: with the page's tile in view, the tile is the readout and there is no floating bar
+    const hero = heroFor(host);
+    if (hero) { hideTooltip(); heroLive(hero, (spec.readout && spec.readout(point, t)) || readoutFromTip(tip)); return point; }
+    heroRest(heroEl(host));
     tip.hidden = false;
     const rect = svg.getBoundingClientRect();
     const scale = rect.width / W;
     const cx = rect.left + anchorX * scale, cy = rect.top + anchorY * scale;
     const tw = tip.offsetWidth, th = tip.offsetHeight;
     let left = clamp(cx - tw / 2, 8, window.innerWidth - tw - 8);
-    // v35: the readout sits above the whole card, so it covers neither the card's title nor the weather icons
-    // over the plot; it still follows the finger sideways. Without room above the card (scrolled to the top
-    // of the screen) it falls back to just above the point, or under it.
+    // v35: the floating bar (only without a tile in view) sits above the whole card, so it covers neither the
+    // card's title nor the weather icons over the plot; it still follows the finger sideways. Without room
+    // above the card (scrolled to the top of the screen) it falls back to just above the point, or under it.
     const box = (host.closest('.card') || host).getBoundingClientRect();
     let top = box.top - th - TIP_GAP;
     if (top < 8) { top = cy - th - 12; if (top < 8) top = cy + 16; }
@@ -819,7 +874,7 @@ function drawChart(host, spec) {
     if (spec.group) for (const other of document.querySelectorAll(`.chart[data-group="${spec.group}"]`)) if (other !== host && other._scrubTo) other._scrubTo(t);
   }
   function clearLocal() {
-    hideTooltip(); dots.textContent = ''; resetMarker();
+    hideTooltip(); heroRest(heroEl(host)); dots.textContent = ''; resetMarker();
     if (lifted) { lifted.classList.remove('lift'); lifted = null; }
     if (spec.onScrub) spec.onScrub(null);
   }
@@ -1844,7 +1899,14 @@ function renderEnsDay(c, d) {
   const k = card('Per uur', []);
   c.appendChild(k.el);
   const word = p => { const ic = icons.find(i => i.hour.getTime() === p.t.getTime()); return ic ? (ic.kind === 'clear' && ic.night ? 'helder' : ICON_WORDS[ic.kind]) : ''; };
-  drawChart(k.body, { sky, group: 'overview', tMin: a, tMax: b, noZoom: true, unit: '°C', unitTip: '°C', ticks: 'days', now: new Date(),
+  // v35: the day's tile reads out the hour under the finger, the same for the temperature and the rain chart
+  const readout = p => {
+    const r = p.row; if (!r) return null;
+    const ic = icons.find(i => i.hour.getTime() === r.t.getTime());
+    return { label: dayTimeLong(r.t), kind: ic && ic.kind, night: ic && ic.night, big: `${wholeDeg(r.tMed)}°`, word: word(r),
+      hint: `${wholeDeg(r.tLo)} tot ${wholeDeg(r.tHi)}° · ${r.pHi >= 0.05 ? `${fmtMm(r.pLo)} tot ${fmtMm(r.pHi)} mm regen` : 'droog'}` }; // the band of 8 of the 10 runs, as in the chart
+  };
+  drawChart(k.body, { sky, group: 'overview', readout, tMin: a, tMax: b, noZoom: true, unit: '°C', unitTip: '°C', ticks: 'days', now: new Date(),
     yOpts: { minSpan: 8, targetTicks: 4 }, icons, trees, height: 240,
     series: [
       { kind: 'band', name: BAND_NAME, color: 'var(--s2)', points: hrs.map(p => ({ t: p.t, lo: p.tLo, hi: p.tHi })) },
@@ -1856,7 +1918,7 @@ function renderEnsDay(c, d) {
   });
   const sub = h('div', 'chart sub');
   k.body.after(sub);
-  drawChart(sub, { sky, group: 'overview', compact: true, tMin: a, tMax: b, noZoom: true, unit: 'mm', unitTip: 'mm', ticks: 'days', now: new Date(),
+  drawChart(sub, { sky, group: 'overview', readout, compact: true, tMin: a, tMax: b, noZoom: true, unit: 'mm', unitTip: 'mm', ticks: 'days', now: new Date(),
     yOpts: { zero: true, minSpan: 1, headroom: 1.15 }, height: 78,
     // as the plume: the middle of the members as a line, at the middle of its hour, inside the band of 90 % of them;
     // the tooltip gives the band as a plain range ("0,0 tot 0,4 mm"), since the median alone is mostly 0
@@ -2139,6 +2201,12 @@ function withCertainty(hero, d) {
   // one decimal: rounded to whole degrees a band of 1,9° could read as 3° wide and contradict "zeker"
   hint.title = `${BAND_NAME}: hoogste temperatuur ${fmtNum(s.lo, 1)}° tot ${fmtNum(s.hi, 1)}°`;
 }
+/* For the readout on a day page's tile (v35): "Vrijdag 13:00", and the sun at that moment. Shorter than the
+   floating bar said it, so the line fits a phone without being cut: by day how high the sun stands, otherwise
+   only the name of the dusk or "nacht". */
+const dayTimeLong = t => { const wd = t.toLocaleDateString(nl, { weekday: 'long' }); return `${wd[0].toUpperCase()}${wd.slice(1)} ${fmtTime(t)}`; };
+const wholeDeg = v => fmtNum(Math.round(v) || 0, 0); // whole degrees without "-0" for a value just under zero
+const sunWords = t => { const alt = sunAltitude(t, state.loc.lat, state.loc.lon); return alt >= SUN_RISESET ? `zon ${fmtNum(Math.max(alt, 0), 0)}° boven de horizon` : sunPhase(alt); };
 /* Tile of a day page for a day other than today: the day's icon, min to max and the chance of rain. */
 function dayHero(c, d) {
   const long = d.day.toLocaleDateString(nl, { weekday: 'long', day: 'numeric', month: 'long' });
@@ -2196,7 +2264,18 @@ function renderOverview(c, day = null, now = new Date()) {
   const pts = T.instant.map(r => ({ t: r.t, tEnd: new Date(r.t.getTime() + HOUR), v: r.temperature_2m, row: r }));
   const iconFor = p => icons.find(i => i.hour.getTime() === p.t.getTime());
   const trees = H.instant.filter(r => !day || inSpan(r.t)).map(r => { const iv = H.interval.find(p => p.t.getTime() === r.t.getTime()); return { t: new Date(r.t.getTime() + HOUR / 2), kmh: r.wind_speed_10m, dir: r.wind_direction_10m, rain: iv ? iv.precipitation : null }; });
-  drawChart(k.body, { sky: skyOf(), group: 'overview',
+  // v35: the tile reads out the hour under the finger, the same for the temperature and the rain chart: the
+  // hour's icon, temperature and weather large, then its rain and the sun (what the floating bar used to say);
+  // for an hour of today that has passed, that it is the forecast and not a measurement
+  const readout = p => {
+    const r = rowAt(T, p.t), ic = iconFor(p), iv = H.interval.find(q => q.t.getTime() === p.t.getTime());
+    const word = ic ? (ic.kind === 'clear' && ic.night ? 'helder' : ICON_WORDS[ic.kind]) : '';
+    return { label: dayTimeLong(p.t), kind: ic && ic.kind, night: ic && ic.night,
+      big: r && r.temperature_2m != null ? `${wholeDeg(r.temperature_2m)}°` : '', word,
+      hint: [iv ? (iv.precipitation >= 0.1 ? `${fmtMm(iv.precipitation)} mm regen` : 'droog') : null,
+        past(p.t) ? 'verwacht, niet gemeten' : sunWords(new Date(p.t.getTime() + HOUR / 2))].filter(Boolean).join(' · ') };
+  };
+  drawChart(k.body, { sky: skyOf(), group: 'overview', readout,
     ...span, noZoom: !!day, unit: '°C', unitTip: '°C', ticks: 'days', now, yOpts: { minSpan: 8, targetTicks: 4 }, icons, trees, height: 240,
     series: [{ kind: 'line', name: 'Temperatuur', color: 'var(--s2)', colorAt: tempColor, points: pts.map(p => ({ t: p.t, v: p.v, row: p.row })), smooth: 'soft', area: true, areaOpacity: 0.16 }],
     fmt: v => fmtNum(v, 0), directLabels: 'minmax', tipTime: p => fmtDayTime(p.t),
@@ -2206,7 +2285,7 @@ function renderOverview(c, day = null, now = new Date()) {
   const sub = h('div', 'chart sub');
   k.body.after(sub);
   const rain = H.interval.map(p => ({ t: p.t, tEnd: p.tEnd, v: p.precipitation }));
-  drawChart(sub, { sky: skyOf(), group: 'overview', compact: true,
+  drawChart(sub, { sky: skyOf(), group: 'overview', readout, compact: true,
     ...span, noZoom: !!day, unit: 'mm', unitTip: 'mm', ticks: 'days', now, yOpts: { zero: true, minSpan: 1, headroom: 1.15 }, height: 78,
     series: [{ kind: 'bar', name: 'Neerslag', color: 'var(--s1)', points: rain }], fmt: fmtMm, tipTime: p => `${fmtWd(p.t)} ${fmtHourRange(p.t)}`,
     tipNote: (s, p) => (past(p.t) ? PAST_NOTE : ''),
@@ -2415,7 +2494,7 @@ function renderInfo(c) {
   }
   const SEE = [
     'De app toont de verwachting voor de gekozen plaats. <b>Overzicht</b> draagt de naam van de plaats (tik erop om een andere te kiezen) en begint met het weer van nu: de temperatuur, het weerbeeld, hoe koud het voelt en de laagste en hoogste temperatuur van vandaag. Daaronder de regenregel: hoe lang het droog blijft, of wanneer het gaat regenen; komt er regen aan, dan kleurt de regel blauw met een mini-radar per 5 minuten. Daaronder het weer per uur en de komende zeven dagen, met per dag het weerbeeld, de laagste en hoogste temperatuur en de kans op regen. Tik op de regenbalk voor <b>Regen</b> (de radar voor de komende 2 uur en de neerslag per uur met de kans op regen) en op de uurstrook voor <b>Per uur</b>, dat temperatuur en weerbeeld per uur naast elkaar zet. Tik op een dag in de lijst voor dezelfde pagina voor alleen die dag (vandaag de hele dag vanaf middernacht, met een stippellijn op nu; de uren daarvoor zijn wat het model verwachtte, geen metingen); voor de dagen na morgen komt die uit het ECMWF-ensemble: de lijn is de middelste van de 51 berekeningen en de band laat zien waar 8 van de 10 berekeningen zitten (de hoogste en de laagste 10% vallen erbuiten), voor temperatuur én regen; bij regen noemt de tooltip die band gewoon als "0,0 tot 0,4 mm", omdat de middelste waarde bij buien bijna altijd 0 is, en de boompjes tonen de wind van de middelste berekening; "‹ Overzicht" linksboven brengt je terug. Trek een pagina bovenaan omlaag om te verversen. Tik op het boompje in de kaart van nu voor <b>Wind</b>. Alles begint op Overzicht; er is geen tabbalk.',
-    'Zoomen: spreid twee vingers op een grafiek om in te zoomen, knijp ze samen om weer verder vooruit te kijken (tot 48 uur). De grafiek begint altijd bij nu; de titel van de kaart toont hoeveel uur je ziet en de keuze wordt onthouden. Sleep met één vinger over een grafiek om de waarden van dat moment te zien; de stippellijn volgt je vinger.',
+    'Zoomen: spreid twee vingers op een grafiek om in te zoomen, knijp ze samen om weer verder vooruit te kijken (tot 48 uur). De grafiek begint altijd bij nu; de titel van de kaart toont hoeveel uur je ziet en de keuze wordt onthouden. Sleep met één vinger over een grafiek om de waarden van dat moment te zien: de stippellijn volgt je vinger en de tegel bovenaan de pagina toont dat moment. Laat je los, dan staat de tegel na een ogenblik weer op de dag of op nu.',
     'De achtergrond van elke grafiek volgt de zon: warm bij daglicht, grijzer naarmate er meer bewolking is, donker in de nacht, met schemer ertussen. De zonnetjes boven de grafiek staan op zonsopkomst en -ondergang en tonen het weerbeeld van dat moment.',
     'Het <b>weerbeeld</b> van een verwacht uur (zonnig, half bewolkt, dunne bewolking, bewolkt, regen) komt uit de bewolking van het model: minder dan 30% is zonnig, 30 tot 70% half bewolkt. Is de lucht (bijna) dicht, dan kijkt de app hoeveel zon er nog doorkomt, vergeleken met een heldere hemel: veel zon betekent losse wolken (half bewolkt), een flink deel betekent een sluier van dunne, hoge wolken (dunne bewolking: zon boven drie strepen) en weinig zon een dik wolkendek (bewolkt). Bij lage zon en \'s nachts beslissen de lagen: alleen hoge wolken is dunne bewolking. Vanaf 0,1 mm in het uur is het regen. Het weerbeeld van nu in de tegel komt uit de metingen.',
     'Bovenaan <b>Overzicht</b> staat het weer per uur, zo ver als ICON-D2 vooruit rekent (tot 48 uur): het icoontje met dezelfde regels als de uurrij op Per uur en de temperatuur van ICON-D2. Nu komt, net als de kaart van nu, uit de metingen; om middernacht staat de naam van de nieuwe dag, en zonsopkomst en -ondergang staan als eigen vakje tussen de uren. Schemer staat op Per uur en de dagpagina\'s. Veeg opzij voor de volgende uren; tik erop voor Per uur.',
@@ -2524,6 +2603,9 @@ function renderWind(c) {
     tipNote: (s, p) => (s.name === 'Wind' ? ` · ${beaufort(p.v)} Bft · ${compass(p.row.wind_direction_10m)}` : ''),
     tipExtra: t => { const r = state.ens && state.ens.bands.wind_speed_10m.find(q => Math.abs(q.t.getTime() - t) < HOUR / 2); return r ? `8 van de 10: ${fmtNum(r.lo, 0)} tot ${fmtNum(r.hi, 0)} km/u` : null; },
     onScrub: p => { if (p) { const iv = H.interval.find(q => q.t.getTime() === p.t.getTime()); setTree(tree, p.v, p.row.wind_direction_10m, fmtDayTime(p.t), iv ? iv.precipitation : null); } else treeNow(); },
+    // v35: the tile reads out the hour under the finger in the words it uses for now
+    readout: p => ({ label: dayTimeLong(p.t), big: `${fmtNum(p.v, 0)} km/u`,
+      hint: `${beaufort(p.v)} Bft${p.row.wind_direction_10m != null ? ` uit ${compass(p.row.wind_direction_10m)}` : ''}${p.row.wind_gusts_10m != null ? ` · stoten ${fmtNum(p.row.wind_gusts_10m, 0)} km/u` : ''}` }),
     aria: 'Windsnelheid en windstoten per uur volgens HARMONIE',
   });
   // the tree under the arrows: what this wind does to a tree, for now or for the hour under your finger
@@ -3908,7 +3990,37 @@ function runTests() {
     ok(!ticks.includes('20:00'), '20:00 weggelaten (te dicht bij nu)'); ok(ticks.includes('20:30'), '20:30 blijft');
     host.remove();
   });
-  test('v35: het balkje bij het scrubben staat boven de kaart, niet over de titel en de icoontjes', () => {
+  test('v35: tijdens het scrubben wordt de tegel bovenaan de uitlezing; het zwevende balkje blijft weg', () => {
+    const wrap = h('div'); wrap.style.cssText = 'position:fixed;left:0;top:100px;width:360px';
+    heroBlock(wrap, '<svg class="ico-big" viewBox="0 0 24 24"></svg>', 'Vrijdag 20 november', '4° tot 7° · bewolkt', 'overdag droog');
+    const hero = wrap.lastElementChild, k = card('Per uur', []); wrap.appendChild(k.el);
+    const sub = h('div', 'chart sub'); k.body.after(sub); document.body.appendChild(wrap);
+    const t0 = new Date(2026, 10, 20, 12, 0);
+    const pts = Array.from({ length: 6 }, (_, i) => ({ t: new Date(t0.getTime() + i * HOUR), tEnd: new Date(t0.getTime() + (i + 1) * HOUR), v: i }));
+    const base = { tMin: t0, tMax: new Date(t0.getTime() + 6 * HOUR), ticks: 'days', unit: 'mm', unitTip: 'mm', series: [{ kind: 'bar', name: 'Neerslag', color: 'red', points: pts }], fmt: fmtMm, tipTime: p => fmtDayTime(p.t), yOpts: { zero: true } };
+    // de bovenste grafiek met een eigen uitlezing (zoals een dagpagina), de onderste zonder (zoals Regen)
+    drawChart(k.body, { ...base, readout: p => ({ label: dayTimeLong(p.t), big: `${p.v}°`, word: 'dunne bewolking', hint: 'droog', kind: 'thin', night: false }) });
+    drawChart(sub, base);
+    const scrub = (host, type = 'pointermove') => { const hit = host.querySelector('rect.hit'), r = hit.getBoundingClientRect(); hit.dispatchEvent(new PointerEvent(type, { clientX: r.left + r.width * 0.6, clientY: r.top + r.height / 2, bubbles: true })); };
+    const lines = () => [...hero.querySelectorAll('.live .l, .live .big .v, .live .big .w, .live .h')].map(e => e.textContent);
+    try {
+      const h0 = hero.getBoundingClientRect().height;
+      scrub(k.body);
+      ok(hero.classList.contains('scrub'), 'tegel in uitlezing'); ok(tooltipEl().hidden, 'geen zwevend balkje');
+      eq(lines().join(' | '), 'Vrijdag 15:00 | 3° | dunne bewolking | droog', 'het uur onder de vinger');
+      ok(hero.querySelector('.live .wicon.thin'), 'met het icoontje van dat uur'); eq(hero.querySelector('.live').getAttribute('aria-hidden'), 'true');
+      eq(hero.getBoundingClientRect().height, h0, 'de tegel verspringt niet'); eq(hero.querySelector('.big').textContent, '4° tot 7° · bewolkt', 'de dag staat er nog onder');
+      scrub(sub); // zonder eigen uitlezing: wat het balkje zou zeggen, met het eigen icoon van de tegel
+      eq(lines().join(' | '), 'Vr 15:00 | 3,0 mm | Neerslag', 'tijd, waarde groot, de rest eronder');
+      ok(hero.querySelector('.live svg.ico-big') && !hero.querySelector('.live .wicon'), 'eigen icoon van de tegel');
+      scrub(sub, 'pointercancel'); ok(!hero.classList.contains('scrub'), 'loslaten: de tegel is weer de dag');
+      hero.style.display = 'none'; scrub(k.body); // tegel niet in beeld: dan het balkje, boven de kaart
+      ok(!tooltipEl().hidden, 'balkje als de tegel niet in beeld is'); ok(!hero.classList.contains('scrub'));
+    } finally { hideTooltip(); wrap.remove(); }
+    eq(readoutFromTip((() => { const t = h('div'); t.appendChild(h('div', 't', 'vr 13:00')); const r = h('div', 'row'); r.appendChild(h('span', 'v', '24 km/u')); r.appendChild(h('span', 'n', 'Wind · 4 Bft')); t.appendChild(r); t.appendChild(h('div', 't sky', 'dag · zon 17° boven de horizon')); t.appendChild(h('div', 't', '8 van de 10: 20 tot 30 km/u')); return t; })()).hint, 'Wind · 4 Bft · 8 van de 10: 20 tot 30 km/u', 'de regel over de zon blijft weg');
+    eq(wholeDeg(-0.3), '0', 'geen -0'); ok(sunWords(new Date(2026, 10, 20, 12, 30)).startsWith('zon '), 'overdag de hoogte van de zon'); eq(sunWords(new Date(2026, 10, 20, 23, 0)), 'nacht');
+  });
+  test('v35: zonder tegel in beeld staat het balkje boven de kaart, niet over de titel en de icoontjes', () => {
     const wrap = h('div'); wrap.style.cssText = 'position:fixed;left:0;top:240px;width:360px';
     const k = card('Per uur', []); wrap.appendChild(k.el); document.body.appendChild(wrap);
     const t0 = new Date(2026, 9, 31, 20, 0);
