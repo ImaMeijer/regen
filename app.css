@@ -316,7 +316,8 @@ h1 { font-size: var(--t-large); font-weight: 700; letter-spacing: -0.02em; margi
 .hero .live .l, .hero .live .big, .hero .live .h { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 .hero .live .big { display: flex; align-items: baseline; gap: 8px; }
 .hero .live .big .v { flex: none; }
-.hero .live .big .w { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: var(--t-title3); font-weight: 600; letter-spacing: -0.01em; }
+.hero .live .big .w { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: var(--t-title3); font-weight: 600; letter-spacing: -0.01em; line-height: 1.4; } /* room for the tail of a g */
+.hero .live .big { overflow: visible; }
 .hero .live .l { color: var(--label); font-weight: 600; }
 .hero .live .h { color: var(--label-2); }
 .hero.scrub > * { transition-duration: var(--dur-fast); }
