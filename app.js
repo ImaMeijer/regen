@@ -185,17 +185,21 @@ function skyFromSun(sw, t0, t1, lat, lon, c) {
 }
 /* Icon of a forecast hour (everything except the measured weather of now): the model's cloud cover decides; when
    the sky is (nearly) closed the sunshine getting through tells thin from thick. Lots of sun under a closed sky is
-   broken cloud (HARMONIE's 2 km cells flip to 100 % under a passing cumulus). Without sunshine (low sun, night) the
-   layers decide: high cloud alone is a veil. THIN_SUN is a first guess from the week of 2 nov 2026; it is being
-   checked daily against satellite and KNMI observations. */
-const THIN_SUN = [0.60, 0.85]; // share of a clear sky: below = bewolkt, between = dunne bewolking, above = half bewolkt
+   broken cloud (HARMONIE's 2 km cells flip to 100 % under a passing cumulus).
+   v37, the veil rule: high cloud alone (VEIL_HIGH or more of it, low and mid under 30 %) is a veil whatever the
+   total says, as long as most of the sun gets through (VEIL_SUN) or the sun is too low to tell. The model lets
+   nearly all sunshine through a cirrus veil, so the sunshine alone called such hours half clouded or sunny.
+   The numbers come from the check of 3–18 nov 2026 against satellite and KNMI observations (verificatie/iconen.md,
+   "Sluierdagen"): 77 of 133 hours right, where THIN_SUN [0.60, 0.85] without the veil rule had 60. */
+const THIN_SUN = [0.70, 0.90]; // share of a clear sky: below = bewolkt, between = dunne bewolking, above = half bewolkt
+const VEIL_HIGH = 40, VEIL_SUN = 0.60; // high cloud (%) from which it is a veil, and the least sunshine under it
 function forecastKind({ cloud, low, mid, high, sun, rain }) {
   if (rain != null && rain >= 0.1) return 'rain';
   if (cloud == null) return sun == null ? 'clear' : sunWeatherKind({ cloud: Math.round(clamp((0.9 - sun) / 0.6, 0, 1) * 100) });
   if (cloud < 30) return 'clear';
+  if (low != null && mid != null && high != null && low < 30 && mid < 30 && high >= VEIL_HIGH && (sun == null || sun >= VEIL_SUN)) return 'thin';
   if (cloud < 70) return 'partly';
   if (sun != null) return sun >= THIN_SUN[1] ? 'partly' : sun >= THIN_SUN[0] ? 'thin' : 'cloud';
-  if (low != null && mid != null && high != null && low < 30 && mid < 30 && high >= 70) return 'thin';
   return 'cloud';
 }
 /* How grey the sky of a chart is: the model's cloud cover, a thin veil counting for half. */
@@ -2057,16 +2061,19 @@ function todayRange(m) {
 
 /* ---------------- Week: per dag het weerbeeld bij daglicht en min/max ---------------- */
 const KIND_RANK = ['clear', 'partly', 'thin', 'cloud', 'rain'];
-/* Day icon from the icons of its light hours (v34; until v33 their median, see README "Versie 34").
+/* Day icon from the icons of its light hours (v34; until v33 their median, see README "Versie 34"; the veil
+   steps are from v37, see README "Versie 37").
    1. Rain in at least half of the hours: rain. Fewer rain hours count on as overcast.
-   2. Cloud score: the mean of DAY_COVER over the hours (sunny 0, half 50 %, thin 75 %, overcast and rain 100 %).
+   2. Cloud score: the mean of DAY_COVER over the hours (sunny 0, half and thin 50 %, overcast and rain 100 %).
    3. Below DAY_SUNNY sunny, from DAY_CLOUDY on overcast, in between half clouded.
-   4. Half clouded has to have happened: with fewer than DAY_PARTLY_MIN hours of half or thin cloud the score
+   4. In between, a veil over at least half of the hours makes it a day of thin cloud (v37).
+   5. Half clouded has to have happened: with fewer than DAY_PARTLY_MIN hours of half or thin cloud the score
       picks between the two ends instead (under 50 % sunny, else overcast). 6 sunny + 5 overcast is a sunny day.
-   5. Overcast becomes thin cloud when thin hours outnumber the overcast and rain hours together.
+   6. Overcast becomes thin cloud with at least DAY_THIN_OVER times as many thin hours as overcast and rain hours
+      together (v37; until v36 more thin hours than those was enough).
    A clear day that clouds over in its last two light hours stays sunny (2 of 9 hours: 22 %). null when empty. */
-const DAY_COVER = { clear: 0, partly: 0.5, thin: 0.75, cloud: 1, rain: 1 };
-const DAY_SUNNY = 0.25, DAY_CLOUDY = 0.65, DAY_PARTLY_MIN = 2;
+const DAY_COVER = { clear: 0, partly: 0.5, thin: 0.5, cloud: 1, rain: 1 };
+const DAY_SUNNY = 0.25, DAY_CLOUDY = 0.65, DAY_PARTLY_MIN = 2, DAY_THIN_OVER = 2;
 function dayKindOf(kinds) {
   const n = kinds.length;
   if (!n) return null;
@@ -2076,8 +2083,11 @@ function dayKindOf(kinds) {
   if (c.rain * 2 >= n) return 'rain';
   const score = sum / n;
   if (score < DAY_SUNNY) return 'clear';
-  if (score < DAY_CLOUDY) return c.partly + c.thin >= DAY_PARTLY_MIN ? 'partly' : score < 0.5 ? 'clear' : 'cloud';
-  return c.thin > c.cloud + c.rain ? 'thin' : 'cloud';
+  if (score < DAY_CLOUDY) {
+    if (c.thin * 2 >= n) return 'thin';
+    return c.partly + c.thin >= DAY_PARTLY_MIN ? 'partly' : score < 0.5 ? 'clear' : 'cloud';
+  }
+  return c.thin >= DAY_THIN_OVER * (c.cloud + c.rain) ? 'thin' : 'cloud';
 }
 /* Day icon of HARMONIE: dayKindOf over the hourly icons (same rules as the hourly row) of the hours of daylight,
    an hour counting when its midpoint has the sun above the horizon. null when HARMONIE misses one of them. */
@@ -2497,9 +2507,9 @@ function renderInfo(c) {
     'De app toont de verwachting voor de gekozen plaats. <b>Overzicht</b> draagt de naam van de plaats (tik erop om een andere te kiezen) en begint met het weer van nu: de temperatuur, het weerbeeld, hoe koud het voelt en de laagste en hoogste temperatuur van vandaag. Daaronder de regenregel: hoe lang het droog blijft, of wanneer het gaat regenen; komt er regen aan, dan kleurt de regel blauw met een mini-radar per 5 minuten. Daaronder het weer per uur en de komende zeven dagen, met per dag het weerbeeld, de laagste en hoogste temperatuur en de kans op regen. Tik op de regenbalk voor <b>Regen</b> (de radar voor de komende 2 uur en de neerslag per uur met de kans op regen) en op de uurstrook voor <b>Per uur</b>, dat temperatuur en weerbeeld per uur naast elkaar zet. Tik op een dag in de lijst voor dezelfde pagina voor alleen die dag (vandaag de hele dag vanaf middernacht, met een stippellijn op nu; de uren daarvoor zijn wat het model verwachtte, geen metingen); voor de dagen na morgen komt die uit het ECMWF-ensemble: de lijn is de middelste van de 51 berekeningen en de band laat zien waar 8 van de 10 berekeningen zitten (de hoogste en de laagste 10% vallen erbuiten), voor temperatuur én regen; bij regen noemt de tooltip die band gewoon als "0,0 tot 0,4 mm", omdat de middelste waarde bij buien bijna altijd 0 is, en de boompjes tonen de wind van de middelste berekening; "‹ Overzicht" linksboven brengt je terug. Trek een pagina bovenaan omlaag om te verversen. Tik op het boompje in de kaart van nu voor <b>Wind</b>. Alles begint op Overzicht; er is geen tabbalk.',
     'Zoomen: spreid twee vingers op een grafiek om in te zoomen, knijp ze samen om weer verder vooruit te kijken (tot 48 uur). De grafiek begint altijd bij nu; de titel van de kaart toont hoeveel uur je ziet en de keuze wordt onthouden. Sleep met één vinger over een grafiek om de waarden van dat moment te zien: de stippellijn volgt je vinger en de tegel bovenaan de pagina toont dat moment. Laat je los, dan staat de tegel na een ogenblik weer op de dag of op nu.',
     'De achtergrond van elke grafiek volgt de zon: warm bij daglicht, grijzer naarmate er meer bewolking is, donker in de nacht, met schemer ertussen. De zonnetjes boven de grafiek staan op zonsopkomst en -ondergang en tonen het weerbeeld van dat moment.',
-    'Het <b>weerbeeld</b> van een verwacht uur (zonnig, half bewolkt, dunne bewolking, bewolkt, regen) komt uit de bewolking van het model: minder dan 30% is zonnig, 30 tot 70% half bewolkt. Is de lucht (bijna) dicht, dan kijkt de app hoeveel zon er nog doorkomt, vergeleken met een heldere hemel: veel zon betekent losse wolken (half bewolkt), een flink deel betekent een sluier van dunne, hoge wolken (dunne bewolking: zon boven drie strepen) en weinig zon een dik wolkendek (bewolkt). Bij lage zon en \'s nachts beslissen de lagen: alleen hoge wolken is dunne bewolking. Vanaf 0,1 mm in het uur is het regen. Het weerbeeld van nu in de tegel komt uit de metingen.',
+    'Het <b>weerbeeld</b> van een verwacht uur (zonnig, half bewolkt, dunne bewolking, bewolkt, regen) komt uit de bewolking van het model: minder dan 30% is zonnig, 30 tot 70% half bewolkt. Ziet het model alleen hoge wolken (40% of meer, met weinig lage en middelbare bewolking), dan is het een sluier: dunne bewolking (zon boven drie strepen), ook als de zon er vrijwel ongehinderd doorheen schijnt. Is de lucht verder (bijna) dicht, dan kijkt de app hoeveel zon er nog doorkomt, vergeleken met een heldere hemel: 90% of meer betekent losse wolken (half bewolkt), 70 tot 90% dunne bewolking en minder een dik wolkendek (bewolkt). Bij lage zon en \'s nachts is een dichte lucht bewolkt, behalve als het alleen hoge wolken zijn. Vanaf 0,1 mm in het uur is het regen. Het weerbeeld van nu in de tegel komt uit de metingen.',
     'Bovenaan <b>Overzicht</b> staat het weer per uur, zo ver als ICON-D2 vooruit rekent (tot 48 uur): het icoontje met dezelfde regels als de uurrij op Per uur en de temperatuur van ICON-D2. Nu komt, net als de kaart van nu, uit de metingen; om middernacht staat de naam van de nieuwe dag, en zonsopkomst en -ondergang staan als eigen vakje tussen de uren. Schemer staat op Per uur en de dagpagina\'s. Veeg opzij voor de volgende uren; tik erop voor Per uur.',
-    'Het <b>weerbeeld van een dag</b> in Overzicht kijkt alleen naar de uren dat het licht is. Elk licht uur krijgt zijn eigen icoontje, met dezelfde regels als de uurrij op Per uur. Regent het in minstens de helft van die uren, dan is de dag regen. Anders telt de app op hoe bewolkt de dag was: een zonnig uur telt voor 0%, half bewolkt voor 50%, dunne bewolking voor 75%, bewolkt en regen voor 100%. Is het gemiddelde lager dan 25%, dan is de dag zonnig; vanaf 65% bewolkt; daartussen half bewolkt. Half bewolkt moet wel echt zijn voorgekomen (minstens twee uur half bewolkt of dunne bewolking); anders wint de zon onder 50% en de bewolking daarboven. Een strak blauwe dag die in de laatste twee lichte uren dichttrekt, blijft zo een zonnige dag. Laagste en hoogste temperatuur gaan over de hele dag. Het getal met de druppel onder het icoontje is de kans op een natte dag: het deel van de ensembleberekeningen met minstens 0,5 mm in de lichte uren van die dag, getoond vanaf 10%; regen in de nacht telt niet mee, net als bij het icoontje. De balk loopt van laagste naar hoogste temperatuur op de schaal van alle dagen samen; de stip is de temperatuur van nu.',
+    'Het <b>weerbeeld van een dag</b> in Overzicht kijkt alleen naar de uren dat het licht is. Elk licht uur krijgt zijn eigen icoontje, met dezelfde regels als de uurrij op Per uur. Regent het in minstens de helft van die uren, dan is de dag regen. Anders telt de app op hoe bewolkt de dag was: een zonnig uur telt voor 0%, half bewolkt en dunne bewolking voor 50%, bewolkt en regen voor 100%. Is het gemiddelde lager dan 25%, dan is de dag zonnig; vanaf 65% bewolkt; daartussen half bewolkt. Half bewolkt moet wel echt zijn voorgekomen (minstens twee uur half bewolkt of dunne bewolking); anders wint de zon onder 50% en de bewolking daarboven. Hing er in minstens de helft van de lichte uren een sluier, dan is zo\'n dag daartussen dunne bewolking. Een bewolkte dag wordt alleen dunne bewolking als er minstens twee keer zoveel uren met een sluier waren als uren met een dik wolkendek of regen. Een strak blauwe dag die in de laatste twee lichte uren dichttrekt, blijft zo een zonnige dag. Laagste en hoogste temperatuur gaan over de hele dag. Het getal met de druppel onder het icoontje is de kans op een natte dag: het deel van de ensembleberekeningen met minstens 0,5 mm in de lichte uren van die dag, getoond vanaf 10%; regen in de nacht telt niet mee, net als bij het icoontje. De balk loopt van laagste naar hoogste temperatuur op de schaal van alle dagen samen; de stip is de temperatuur van nu.',
     'De dagen in Overzicht gebruiken zolang het kan dezelfde modellen als de rest van de app: HARMONIE voor het weerbeeld, ICON-D2 voor de temperatuur en het ICON-D2-ensemble voor de kans, meestal vandaag en morgen. Voor de dagen daarna komt alles uit het <b>ECMWF-ensemble</b>, dat ook achter de pluim van het KNMI zit: 51 berekeningen op een raster van 25 km. Elke berekening krijgt zijn eigen dag met dezelfde regels; de dag krijgt het middelste icoontje van de 51 en de middelste laagste en hoogste temperatuur, zoals de pluim. Het vage deel van de balk loopt van de lage minimumtemperatuur tot de hoge maximumtemperatuur van 8 van de 10 berekeningen; hoe breder, hoe onzekerder.',
   ];
   const SRC = [
@@ -3645,11 +3655,22 @@ function runTests() {
   test('icoon verwachting: bewolking beslist, bij een dichte lucht de zon die doorkomt; zonder zon de lagen', () => {
     eq(forecastKind({ cloud: 20, sun: 0.3 }), 'clear', 'weinig bewolking: zonnig, ook bij weinig zon');
     eq(forecastKind({ cloud: 50, sun: 0.3 }), 'partly');
-    eq(forecastKind({ cloud: 95, sun: 0.9 }), 'partly', 'dicht maar volop zon: losse wolken');
-    eq(forecastKind({ cloud: 95, sun: 0.77 }), 'thin', 'di 10 nov 13 u'); eq(forecastKind({ cloud: 95, sun: 0.6 }), 'thin');
+    eq(forecastKind({ cloud: 95, sun: 0.9 }), 'partly', 'dicht maar volop zon: losse wolken'); eq(forecastKind({ cloud: 95, sun: 0.87 }), 'thin', 'v37: bovengrens 0,90 (was 0,85)');
+    eq(forecastKind({ cloud: 95, sun: 0.77 }), 'thin', 'di 10 nov 13 u'); eq(forecastKind({ cloud: 95, sun: 0.7 }), 'thin');
+    eq(forecastKind({ cloud: 95, sun: 0.66 }), 'cloud', 'v37: ondergrens 0,70 (was 0,60)'); eq(forecastKind({ cloud: 99, low: 31, mid: 0, high: 88, sun: 0.66 }), 'cloud', 'za 7 nov 9 u: lage bewolking erbij, geen sluier');
     eq(forecastKind({ cloud: 100, sun: 0.48 }), 'cloud', 'za 7 nov 15 u');
     eq(forecastKind({ cloud: 90, low: 5, mid: 10, high: 90, sun: null }), 'thin', 'lage zon: alleen hoge wolken');
     eq(forecastKind({ cloud: 90, low: 80, mid: 10, high: 90, sun: null }), 'cloud');
+    // v37, de sluierregel: alleen hoge bewolking is dunne bewolking, wat het totaal ook zegt (uren van de check van 3–18 nov 2026)
+    eq(forecastKind({ cloud: 48, low: 2, mid: 0, high: 46, sun: 0.77 }), 'thin', 'wo 4 nov 9 u: was half bewolkt');
+    eq(forecastKind({ cloud: 84, low: 0, mid: 0, high: 84, sun: 1.0 }), 'thin', 'di 10 nov 11 u: volle zon door de sluier, was half bewolkt');
+    eq(forecastKind({ cloud: 70, low: 0, mid: 0, high: 70, sun: 0.64 }), 'thin', 'wo 4 nov 13 u: onder de 0,70 maar een sluier');
+    eq(forecastKind({ cloud: 75, low: 0, mid: 17, high: 71, sun: 0.59 }), 'cloud', 'za 7 nov 15 u: te weinig zon voor een sluier');
+    eq(forecastKind({ cloud: 35, low: 0, mid: 0, high: 35, sun: 1.0 }), 'partly', 'di 10 nov 13 u: minder dan 40 % hoge bewolking');
+    eq(forecastKind({ cloud: 26, low: 0, mid: 0, high: 45, sun: 1.0 }), 'clear', 'onder 30 % in totaal blijft zonnig');
+    eq(forecastKind({ cloud: 60, low: 24, mid: 0, high: 35, sun: 0.85 }), 'partly'); eq(forecastKind({ cloud: 54, low: 49, mid: 0, high: 45, sun: 0.9 }), 'partly', 'lage bewolking: geen sluier');
+    eq(forecastKind({ cloud: 50, low: 0, mid: 0, high: 50, sun: null }), 'thin', 'nacht of lage zon: ook onder de 70 % een sluier');
+    eq(forecastKind({ cloud: 50, sun: 0.95 }), 'partly', 'zonder lagen geen sluierregel');
     eq(forecastKind({ cloud: 90, sun: null }), 'cloud', 'zonder lagen: bewolkt');
     eq(forecastKind({ cloud: 95, sun: 0.7, rain: 0.2 }), 'rain'); eq(forecastKind({ cloud: null, sun: 0.95 }), 'clear', 'zonder bewolking: de zon');
     eq(tintCover('thin', 90), 45, 'een sluier telt voor de helft in de grijstint'); eq(tintCover('cloud', 90), 90);
@@ -3666,12 +3687,12 @@ function runTests() {
       for (const v of VARS) hourly[`${v}_${id}`] = Array(48).fill(v === 'precipitation' ? 0 : v.startsWith('cloud') ? 0 : 10);
       for (const i of [12, 13, 14]) hourly[`cloud_cover_${id}`][i] = 100;
       const sw = (hr, f) => { hourly[`shortwave_radiation_${id}`][hr + 1] = f * clearSky(new Date(2026, 10, 2, hr), new Date(2026, 10, 2, hr + 1), 52.37, 4.9).ghi; };
-      sw(12, 0.95); sw(13, 0.7); sw(14, 0.4);
+      sw(12, 0.95); sw(13, 0.8); sw(14, 0.4);
       state.loc = { name: 'x', lat: 52.37, lon: 4.9 };
       state.forecast = parseForecast({ latitude: 52.37, longitude: 4.9, hourly }, new Date(2026, 10, 2, 9, 5));
       const H = state.forecast.models.harmonie, kindAt = hr => hourIcons(H).find(x => x.hour.getHours() === hr).kind;
       eq(H.instant.find(r => r.t.getHours() === 13).cloud_cover, 100, 'bewolking 13:00 gladgemaakt');
-      eq(kindAt(12), 'partly', '75 % met volop zon'); eq(kindAt(13), 'thin', '100 % met 70 % zon'); eq(kindAt(14), 'cloud', '75 % met 40 % zon');
+      eq(kindAt(12), 'partly', '75 % met volop zon'); eq(kindAt(13), 'thin', '100 % met 80 % zon'); eq(kindAt(14), 'cloud', '75 % met 40 % zon');
       const w = weatherAt(new Date(2026, 10, 2, 13, 10)); eq(w.kind, 'thin'); eq(w.cloud, 50, 'grijstint: sluier telt half');
     } finally { state.forecast = saved; state.loc = savedLoc; }
   });
@@ -3747,9 +3768,15 @@ function runTests() {
     // regen: minstens de helft van de lichte uren
     eq(day({ rain: 5, clear: 5 }), 'rain', 'precies de helft'); eq(day({ rain: 4, clear: 5 }), 'clear', '44 %, geen half bewolkt');
     eq(day({ rain: 4, cloud: 5 }), 'cloud', 'minder dan de helft regen telt als bewolkt'); eq(day({ rain: 9 }), 'rain');
-    // dunne bewolking: alleen als die meer uren heeft dan bewolkt en regen samen
-    eq(day({ thin: 9 }), 'thin', '75 %'); eq(day({ thin: 5, cloud: 4 }), 'thin'); eq(day({ thin: 4, cloud: 4 }), 'cloud', 'gelijk: bewolkt');
-    eq(day({ clear: 2, thin: 1, cloud: 6 }), 'cloud', 'één uur dun maakt geen dunne dag'); eq(day({ clear: 5, thin: 4 }), 'partly', '33 %');
+    // dunne bewolking (v37): telt als 50 %; in minstens de helft van de uren maakt het de dag dun; van een bewolkte dag alleen bij twee keer zoveel dunne als bewolkte en regenuren
+    eq(day({ thin: 9 }), 'thin', '50 %, alle uren dun'); eq(day({ thin: 6, cloud: 3 }), 'thin', '67 %: precies twee keer zoveel');
+    eq(day({ thin: 5, cloud: 4 }), 'cloud', '72 %: za 7 nov 2026, tot v36 dunne bewolking'); eq(day({ thin: 4, cloud: 4 }), 'cloud');
+    eq(day({ clear: 2, thin: 1, cloud: 6 }), 'cloud', 'één uur dun maakt geen dunne dag');
+    eq(day({ clear: 1, partly: 3, thin: 5 }), 'thin', '44 %: wo 4 nov 2026, tot v36 half bewolkt'); eq(day({ clear: 2, thin: 7 }), 'thin', '39 %: za 14 nov 2026');
+    eq(day({ clear: 5, thin: 4 }), 'clear', '22 %: vr 6 nov 2026, een heldere dag met een sluier in de middag (tot v36 half bewolkt bij 33 %)');
+    eq(day({ clear: 4, partly: 1, thin: 4 }), 'partly', '28 %: di 10 nov 2026, dun in minder dan de helft van de uren');
+    eq(day({ clear: 5, thin: 5 }), 'thin', 'precies de helft, zoals bij regen'); eq(day({ thin: 5, cloud: 1, clear: 3 }), 'thin', '39 %');
+    eq(day({ rain: 5, thin: 4 }), 'rain', 'regen gaat voor'); eq(day({ partly: 5, thin: 4 }), 'partly', '50 %');
     eq(dayKindOf([]), null);
     // over de leden: het middelste dagicoontje, bij een even aantal het bewolktere van de twee middelste
     eq(middleKind(['clear', 'rain', 'cloud']), 'cloud'); eq(middleKind(['clear', 'cloud']), 'cloud', 'geen gemiddelde (was dunne bewolking)');

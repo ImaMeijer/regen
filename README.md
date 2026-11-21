@@ -510,3 +510,66 @@ Op verzoek van Ima (21 november 2026): de regenverwachting, en eigenlijk elke ve
 - De verstreken uren van vandaag komen nog steeds alleen uit het model, zonder radar (21 november: model 0,3 mm, gemeten op Schiphol 1,9 mm; de regen die de radar overdag liet zien, verdween uit de dag zodra het uur voorbij was). Dat wacht op de eigen backend met het radararchief van het KNMI.
 
 - Cache v36. Zelftests: 93 (de locatietest uitgebreid: 300 m, onnauwkeurige posities, radar op 3 decimalen).
+
+## Versie 37: sluierbewolking, per uur en per dag
+
+Op verzoek van Ima (21 november 2026): het dagicoontje van versie 34 werkt goed, behalve op dagen met een sluier. De onderbouwing staat in `verificatie/iconen.md`, sectie "Sluierdagen": de check van 3 t/m 18 november 2026 tegen de waarnemingen op Schiphol en de satelliet.
+
+### De oude situatie (versie 20 tot en met 36)
+
+- **Per uur** (`forecastKind`): onder 30% bewolking zonnig, 30 tot 70% half bewolkt. Vanaf 70% besliste de zon die doorkwam (`THIN_SUN = [0.60, 0.85]`): 85% of meer half bewolkt, 60 tot 85% dunne bewolking, minder bewolkt. Alleen bij lage zon en 's nachts keek de app naar de lagen (alleen hoge bewolking van 70% of meer was dunne bewolking).
+- **Per dag** (`dayKindOf`, versie 34): dunne bewolking telde voor 75% in de score, en een dag werd pas dunne bewolking bij een score van 65% of meer en meer dunne uren dan bewolkte en regenuren.
+
+Wat daar mis mee was:
+
+- **HARMONIE laat de zon vrijwel ongehinderd door een sluier schijnen.** Op 10 en 14 november gaf het model 75 tot 94% hoge bewolking met 94 tot 102% van de zon van een heldere hemel. De app maakte daar half bewolkt van, of zonnig als de sluier onder de 30% bleef.
+- **Een sluier van 30 tot 70% heette altijd half bewolkt.** Op 4 november zag de waarnemer zes uur lang een gesloten dunne lucht; het model had 46 tot 78% hoge bewolking en de app gaf twee van die zes uren dunne bewolking.
+- **Een dag met zes uur sluier en drie uur zon of half bewolkt haalde de 65% niet** (61%) en werd half bewolkt.
+
+### De nieuwe situatie
+
+Per uur, in deze volgorde:
+
+1. 0,1 mm of meer: regen (ongewijzigd).
+2. Minder dan 30% bewolking: zonnig (ongewijzigd).
+3. **Sluier (nieuw):** lage en middelbare bewolking elk onder 30%, hoge bewolking 40% of meer (`VEIL_HIGH`) en minstens 60% van de zon van een heldere hemel (`VEIL_SUN`), of een zon die te laag staat om dat te zeggen: dunne bewolking.
+4. 30 tot 70% bewolking: half bewolkt (ongewijzigd).
+5. 70% of meer: de zon die doorkomt, met **`THIN_SUN = [0.70, 0.90]`**: 90% of meer half bewolkt, 70 tot 90% dunne bewolking, minder bewolkt.
+6. 70% of meer bij een lage zon of 's nachts: bewolkt. De oude uitzondering voor alleen hoge bewolking valt nu onder stap 3.
+
+Per dag (`dayKindOf`):
+
+- **Dunne bewolking telt voor 50%** in de score (`DAY_COVER.thin`, was 75%).
+- **Bij een score van 25 tot 65%: dunne bewolking in minstens de helft van de lichte uren maakt de dag dunne bewolking.** Anders als in versie 34.
+- **Bij een score van 65% of meer: dunne bewolking alleen bij minstens twee keer zoveel dunne uren als bewolkte en regenuren samen** (`DAY_THIN_OVER`, was: meer dunne uren).
+
+De regels gelden ook voor elk lid van het ECMWF-ensemble (`memberKind`, `memberDay`).
+
+### Wat het oplevert op de 16 dagen van de check
+
+Nagerekend met de HARMONIE-uren van 2 t/m 19 november en de formules van de app. Een dag telt als goed als het dagicoontje gelijk is aan wat de waargenomen uren met dezelfde dagregel geven; 4 en 14 november waren zo dunne bewolking.
+
+| | Uren goed (van 133) | Dagen goed (van 16) | Sluierdagen 4, 6, 7, 10 en 14 nov |
+|---|---|---|---|
+| Versie 36 | 60 | 9 | 3 van 5 |
+| Versie 37 | 77 | 11 | 5 van 5 |
+
+- De sluierregel verandert op de elf andere dagen geen enkel uur.
+- De vijf dagen die fout blijven: op 3, 8, 12 en 16 november miste HARMONIE een dicht wolkendek, en 17 november was een regendag die de maat als bewolkt telt.
+
+### De keuzes, en waarom
+
+- **De lagen beslissen, niet de zon** (stap 3). De straling van het model is onder een dunne sluier niet van een heldere hemel te onderscheiden; alleen dat het model uitsluitend hoge bewolking ziet, verraadt de sluier.
+- **Ondergrens 0,70 voor al het andere.** De twee sluieruren tussen 0,60 en 0,70 hadden alleen hoge bewolking en vallen nu onder de sluierregel; de vijf bewolkte uren in die band hadden lage of middelbare bewolking.
+- **50% voor een sluieruur.** Onder een sluier schijnt vaak de volle zon; zo'n uur is even open als een half bewolkt uur. Met 75% werd een heldere dag met een sluier in de middag (6 november) half bewolkt.
+- **Twee keer zoveel dunne als bewolkte uren.** Op 7 november gaf het model 5 uur sluier en 4 uur bewolkt, terwijl de dag bewolkt was. Dit draait een keuze van versie 34 om (5 dun + 4 bewolkt was dunne bewolking).
+
+### Wat nog niet is opgelost of getoetst
+
+- **De getallen zijn afgesteld op vijf sluierdagen, en de marges zijn smal.** De grens voor hoge bewolking werkt van 36 tot 46%, de zon-eis alleen tussen 0,594 en 0,637, en elk onderdeel van de dagregel is voor precies één van de vijf dagen nodig. Nieuwe sluierdagen kunnen anders uitvallen; de dagelijkse taak `regen-iconen-check` blijft het volgen.
+- **Voor het ECMWF-ensemble is niets getoetst:** de ensemble-API bewaart maar een paar dagen. In de week van 21 november veranderden drie van de acht dagicoontjes (zondag en woensdag van half bewolkt naar dunne bewolking, vrijdag van dunne bewolking naar bewolkt).
+- **'s Nachts** wordt alleen hoge bewolking van 40 tot 70% nu ook dunne bewolking (was half bewolkt). Dat volgt uit dezelfde regel, maar is niet tegen waarnemingen gelegd.
+- **Een dag springt van zonnig naar dunne bewolking** zonder half bewolkt ertussen: 5 uur zon en 4 uur sluier is zonnig (22%), 4 uur zon en 5 uur sluier dunne bewolking.
+
+- Info legt de sluierregel uit bij "weerbeeld" en "weerbeeld van een dag".
+- Cache v37. Zelftests: 93 (de icoontest en de dagtest uitgebreid met de uren en dagen van de check).
