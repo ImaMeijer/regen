@@ -478,3 +478,35 @@ Er is geen zwevend balkje meer zolang de tegel bovenaan de pagina in beeld is. D
 
 - Info noemt de tegel bij "Sleep met één vinger over een grafiek".
 - Cache v35. Zelftests: 93 (nieuw: de tegel als uitlezing met eigen en met algemene uitlezing, loslaten, terugval op het balkje; het balkje boven de kaart).
+
+## Versie 36: het weer voor waar je staat, niet voor een plek tot 2 km terug
+
+Op verzoek van Ima (21 november 2026): de regenverwachting, en eigenlijk elke verwachting, moet altijd voor de huidige coördinaten gelden en niet voor de dichtstbijzijnde stad.
+
+### De oude situatie (versie 33)
+
+- Met "Volg mijn locatie" aan rekende de app al met je echte coördinaten; de plaatsnaam (PDOK of BigDataCloud) is alleen een etiket. Er werd nooit naar het centrum van een plaats omgerekend.
+- Maar het weer werd pas opnieuw geladen als je **2 km of meer** was verplaatst (`HERE_MOVE_KM`). Tot die tijd gold het voor de oude plek.
+- Buienradar kreeg de positie op **2 decimalen** (ongeveer 1 km); Open-Meteo op 4 (ongeveer 10 m).
+- De positie werd op de snelle, grove manier gevraagd (wifi en zendmasten), niet met gps.
+
+### De nieuwe situatie
+
+- **Opnieuw laden vanaf 300 m** (`HERE_MOVE_KM = 0.3`). Gecontroleerd bij het openen en telkens als je naar de app terugkomt, hooguit eens per 2 minuten (ongewijzigd).
+- **Buienradar krijgt 3 decimalen** (ongeveer 100 m), zoals de diensten voor de plaatsnaam.
+- **De positie wordt zo nauwkeurig mogelijk gevraagd** (`enableHighAccuracy`); lukt dat niet binnen 10 seconden (binnenshuis), dan nog één keer op de grove manier.
+- **Een onnauwkeurige positie telt pas als je verder weg bent dan ze onzeker is** (`hereStep` met de nauwkeurigheid die de telefoon meldt), en vanaf 2 km altijd (`HERE_COARSE_KM`). Zo laadt de app niet opnieuw op het verspringen van een grove positie.
+- De privacytekst onder Info noemt nu ook dat je positie naar Buienradar en Open-Meteo gaat, en met welke afronding.
+
+### De keuzes, en waarom
+
+- **300 m en niet kleiner:** de radar heeft vakjes van ongeveer 1 km en HARMONIE van 2 km. Fijner dan dit verandert de verwachting niet, en een kleinere stap laadt opnieuw op het verspringen van de positie binnenshuis.
+- **Een gekozen plaats blijft het centrum van die plaats.** Wie een plaats uit de zoeklijst kiest (of de standaardplaats Amsterdam houdt), wil het weer daar; alleen "Volg mijn locatie" gebruikt je eigen coördinaten. Volgen staat niet vanzelf aan: de app vraagt je locatie pas als je erom vraagt.
+- **Tegen audit F12 in:** die raadde aan coördinaten op 2 decimalen af te ronden voor de privacy. Ima kiest hier voor nauwkeurigheid; de privacytekst zegt eerlijk wat er verstuurd wordt.
+
+### Wat nog niet is nagekeken
+
+- Op een echte telefoon is niet geprobeerd hoe lang de nauwkeurige positie duurt en of het vaker opnieuw laden stoort tijdens het fietsen of lopen.
+- De verstreken uren van vandaag komen nog steeds alleen uit het model, zonder radar (21 november: model 0,3 mm, gemeten op Schiphol 1,9 mm; de regen die de radar overdag liet zien, verdween uit de dag zodra het uur voorbij was). Dat wacht op de eigen backend met het radararchief van het KNMI.
+
+- Cache v36. Zelftests: 93 (de locatietest uitgebreid: 300 m, onnauwkeurige posities, radar op 3 decimalen).

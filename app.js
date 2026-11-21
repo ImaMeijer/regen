@@ -967,7 +967,8 @@ try {
   const hz = parseFloat(localStorage.getItem('regen.horizon')); if (Number.isFinite(hz) && hz >= HORIZON_MIN) state.horizon = hz;
 } catch (e) {}
 
-const nowcastUrl = (lat, lon) => `https://gpsgadget.buienradar.nl/data/raintext?lat=${lat.toFixed(2)}&lon=${lon.toFixed(2)}`;
+// the radar for where you are, to about 100 m (3 decimals; until v35 two, about 1 km): the radar's own cells are about 1 km
+const nowcastUrl = (lat, lon) => `https://gpsgadget.buienradar.nl/data/raintext?lat=${lat.toFixed(3)}&lon=${lon.toFixed(3)}`;
 const forecastUrl = (lat, lon) => `https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(4)}&longitude=${lon.toFixed(4)}` +
   `&hourly=${VARS.join(',')}&models=${PRIMARY.id},${TEMP_MODEL.id}&forecast_days=4&timezone=Europe%2FAmsterdam`;
 /* ICON-D2-EPS: 20 leden, 2,2 km, ±48 u. Alleen voor kans en spreiding; HARMONIE blijft de verwachting. */
@@ -2573,7 +2574,7 @@ function renderInfo(c) {
   sec('Beaufort volgens KNMI', [
     '<table class="bft">' + BEAUFORT.map((b, i) => `<tr><td class="num">${i}</td><td>${b[0]}</td><td>${b[1]}</td></tr>`).join('') + '</table>',
   ]);
-  c.appendChild(h('p', 'info-foot', 'Deze app is een privéprototype. Instellingen zoals plaats en zoom, en de laatst opgehaalde weergegevens, blijven op je eigen telefoon; er worden geen gegevens verzameld. Volgt de app je locatie, dan gaat je positie, afgerond op ongeveer 100 meter, naar PDOK (de kaartdienst van de overheid) om de naam van de plaats te vinden, en buiten Nederland naar BigDataCloud.'));
+  c.appendChild(h('p', 'info-foot', 'Deze app is een privéprototype. Instellingen zoals plaats en zoom, en de laatst opgehaalde weergegevens, blijven op je eigen telefoon; er worden geen gegevens verzameld. Volgt de app je locatie, dan gaat je positie, afgerond op ongeveer 100 meter, naar PDOK (de kaartdienst van de overheid) om de naam van de plaats te vinden, en buiten Nederland naar BigDataCloud. Het weer zelf wordt voor je positie opgevraagd bij Buienradar (afgerond op ongeveer 100 meter) en bij Open-Meteo (ongeveer 10 meter). Sta je 300 meter of meer verder dan de vorige keer, dan wordt het weer voor je nieuwe plek geladen.'));
 }
 
 /* ---------------- Wind ---------------- */
@@ -3321,7 +3322,13 @@ $('searchForm').addEventListener('submit', async ev => {
    Coordinates always become the name of the nearest place: inside the Netherlands the woonplaats you are in,
    from PDOK (Kadaster); elsewhere the town from BigDataCloud. Both get the position rounded to 3 decimals
    (about 100 m). Without a name: "Mijn locatie", and the name is asked again next time. ---- */
-const HERE_MOVE_KM = 2, HERE_EVERY = 2 * 60e3;
+/* v36: the weather is for where you stand, not for a spot up to 2 km back. It is loaded again once you are
+   HERE_MOVE_KM (300 m) further: the radar's cells are about 1 km and HARMONIE's 2 km, so finer than this changes
+   nothing, and a smaller step would reload on the jitter of a phone's position indoors. A fix that is less
+   exact than that (accuracy in metres from the phone) only counts once you are further away than it is
+   unsure, and at HERE_COARSE_KM (the old 2 km) always. The position is asked as exactly as the phone can
+   (enableHighAccuracy); when that fails, once more the quick, coarse way. */
+const HERE_MOVE_KM = 0.3, HERE_COARSE_KM = 2, HERE_EVERY = 2 * 60e3;
 const placeUrlNl = (lat, lon) => `https://api.pdok.nl/bzk/locatieserver/search/v3_1/reverse?lat=${lat.toFixed(3)}&lon=${lon.toFixed(3)}&type=woonplaats&rows=1&distance=1000&fl=woonplaatsnaam,provincienaam,afstand`;
 const placeUrlWorld = (lat, lon) => `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat.toFixed(3)}&longitude=${lon.toFixed(3)}&localityLanguage=nl`;
 function placeFromPdok(json) { // only the woonplaats you are in (afstand 0): across the border PDOK names the nearest Dutch one, km away
@@ -3337,18 +3344,19 @@ async function placeName(lat, lon) {
   try { return placeFromWorld(await fetchOk(placeUrlWorld(lat, lon))); } catch (e) { return null; }
 }
 /* what to do with a new position: 'move' = load the weather for it, 'name' = same spot, still without a name, 'keep' = nothing */
-function hereStep(cur, lat, lon) {
-  if (!cur.here || haversineKm(cur.lat, cur.lon, lat, lon) >= HERE_MOVE_KM) return 'move';
+function hereStep(cur, lat, lon, accuracyM = 0) {
+  const need = clamp((accuracyM || 0) / 1000, HERE_MOVE_KM, HERE_COARSE_KM);
+  if (!cur.here || haversineKm(cur.lat, cur.lon, lat, lon) >= need) return 'move';
   return cur.named ? 'keep' : 'name';
 }
 const here = { busy: false, at: 0 };
-function locate(manual) {
+function locate(manual, coarse = false) {
   if (!navigator.geolocation) { if (manual) toast('Je locatie is op dit apparaat niet beschikbaar'); return; }
   if (here.busy) return;
   here.busy = true; here.at = Date.now();
   navigator.geolocation.getCurrentPosition(async pos => {
     try {
-      const lat = pos.coords.latitude, lon = pos.coords.longitude, cur = state.loc, step = hereStep(cur, lat, lon);
+      const lat = pos.coords.latitude, lon = pos.coords.longitude, cur = state.loc, step = hereStep(cur, lat, lon, pos.coords.accuracy);
       if (step === 'keep') { state.follow = true; saveLoc(); geoSync(); if (manual) closeSheet(); render(); return; }
       const place = await placeName(lat, lon);
       const named = { name: place ? place.name : 'Mijn locatie', admin: place ? place.admin : '', here: true, named: !!place };
@@ -3357,8 +3365,9 @@ function locate(manual) {
     } finally { here.busy = false; }
   }, err => {
     here.busy = false;
+    if (err.code !== 1 && !coarse) { locate(manual, true); return; } // no exact fix in time (indoors): the quick, coarse one
     if (manual) toast(err.code === 1 ? 'Geen toestemming voor je locatie. Sta die toe bij de instellingen van je browser.' : 'Je locatie is nu niet te bepalen');
-  }, { timeout: 10000, maximumAge: 120000 });
+  }, { enableHighAccuracy: !coarse, timeout: 10000, maximumAge: 120000 });
 }
 /* the button in the location sheet says whether the place follows you */
 function geoSync() {
@@ -4339,7 +4348,7 @@ function runTests() {
       try { scrollJump(200); ok(!ptrStart(100, 200), 'niet als de pagina naar beneden gescrold is'); } finally { spacer.remove(); toTop(); }
     } finally { nav.stack = savedNav; ptr.reload = savedReload; ptr.busy = false; ptr.on = false; ptr.engaged = false; ptrHide(); }
   });
-  test('v33: volg mijn locatie: plaatsnaam uit PDOK of BigDataCloud; pas opnieuw laden na 2 km; pijltje achter de naam', () => {
+  test('v33/v36: volg mijn locatie: plaatsnaam uit PDOK of BigDataCloud; opnieuw laden vanaf 300 m; pijltje achter de naam', () => {
     const pd = (naam, prov, afstand) => ({ response: { numFound: 1, docs: [{ woonplaatsnaam: naam, provincienaam: prov, afstand }] } });
     eq(placeFromPdok(pd('Wijk bij Duurstede', 'Utrecht', 0)).name, 'Wijk bij Duurstede'); eq(placeFromPdok(pd('Utrecht', 'Utrecht', 0)).admin, 'Utrecht');
     eq(placeFromPdok(pd('Putte', 'Noord-Brabant', 15066)), null, 'over de grens: niet de dichtstbijzijnde Nederlandse plaats op 15 km');
@@ -4348,7 +4357,12 @@ function runTests() {
     eq(placeFromWorld({ city: '', locality: 'Anjum', principalSubdivision: 'Friesland' }).name, 'Anjum', 'zonder stad: het dorp'); eq(placeFromWorld({}), null);
     ok(placeUrlNl(52.123456, 5.987654).includes('lat=52.123&lon=5.988'), 'positie afgerond op 3 decimalen'); ok(placeUrlWorld(52.123456, 5.987654).includes('latitude=52.123&longitude=5.988'));
     eq(hereStep({ lat: 52, lon: 5 }, 52, 5), 'move', 'een gekozen plaats: eerste keer volgen laadt je eigen plek');
-    eq(hereStep({ lat: 52, lon: 5, here: true, named: true }, 52.005, 5), 'keep', '550 m verder: niets'); eq(hereStep({ lat: 52, lon: 5, here: true, named: true }, 52.03, 5), 'move', '3,3 km verder: opnieuw laden');
+    const at = { lat: 52, lon: 5, here: true, named: true };
+    eq(hereStep(at, 52.002, 5), 'keep', '220 m verder: niets'); eq(hereStep(at, 52.005, 5), 'move', '550 m verder: opnieuw laden (v36; was 2 km)'); eq(hereStep(at, 52.03, 5), 'move', '3,3 km verder');
+    // een onnauwkeurige positie telt pas als je verder weg bent dan ze onzeker is, en vanaf 2 km altijd
+    eq(hereStep(at, 52.005, 5, 40), 'move', 'nauwkeurig tot 40 m'); eq(hereStep(at, 52.005, 5, 800), 'keep', '550 m verder maar 800 m onzeker: niets');
+    eq(hereStep(at, 52.01, 5, 800), 'move', '1,1 km verder'); eq(hereStep(at, 52.015, 5, 5000), 'keep', '1,7 km verder, 5 km onzeker'); eq(hereStep(at, 52.03, 5, 5000), 'move', 'vanaf 2 km altijd');
+    ok(nowcastUrl(52.37049, 4.89551).includes('lat=52.370&lon=4.896'), 'radar voor je positie op 3 decimalen (was 2)');
     eq(hereStep({ lat: 52, lon: 5, here: true, named: false }, 52.001, 5), 'name', 'zelfde plek zonder naam: alleen de naam ophalen');
     const saved = { l: state.loc, f: state.follow, t: state.tab, n: nav.stack };
     try {
